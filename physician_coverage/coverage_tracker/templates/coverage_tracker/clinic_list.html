@@ -1,0 +1,123 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Clinics & Coverage{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Clinics & Coverage</h1>
+    <p class="text-muted text-sm mt-1">{{ view_date|date:"l, F j, Y" }}</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/clinics/add/" class="btn btn-ghost">+ Add Clinic</a>
+    <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" class="btn btn-primary">+ Assign Locum</a>
+  </div>
+</div>
+
+<div class="date-nav">
+  <form method="get" style="display:flex;gap:8px;align-items:center;">
+    <label style="font-size:12.5px;color:var(--text-3);">View date:</label>
+    <input type="date" name="date" value="{{ view_date|date:'Y-m-d' }}">
+    <button type="submit" class="btn btn-ghost btn-sm">Go</button>
+  </form>
+</div>
+
+<div class="two-col" style="align-items:start;">
+  <div>
+    <h3 style="margin-bottom:1rem;">Clinic Assignments</h3>
+    <div style="display:flex;flex-direction:column;gap:1rem;">
+      {% for item in clinic_data %}
+      <div class="clinic-card">
+        <div class="clinic-card-header">
+          <div>
+            <div style="font-weight:600;font-size:14px;">{{ item.clinic.name }}</div>
+            {% if item.clinic.location %}<div class="text-muted text-sm">{{ item.clinic.location }}</div>{% endif %}
+          </div>
+          <div class="flex gap-2">
+           
+            <a href="/clinics/{{ item.clinic.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
+          </div>
+        </div>
+        <div class="clinic-card-body">
+          <!-- Regular physicians -->
+          {% if item.clinic.regular_physicians.all %}
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Regular Staff</div>
+            {% for p in item.clinic.regular_physicians.all %}
+              <div class="flex items-center gap-2" style="padding:4px 0;">
+                <div class="doc-tag">{{ p }}</div>
+                {% if p in item.regular_out %}
+                  <span class="badge badge-off">Out today</span>
+                {% else %}
+                  <span class="badge badge-available">Present</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <!-- Locum coverage -->
+          {% if item.regular_out %}
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Locum Coverage Today</div>
+            {% if item.assignments %}
+              {% for a in item.assignments %}
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);">
+                <div>
+                  <div class="locum-tag">{{ a.covering_physician }}</div>
+                  {% if a.covered_physician %}<div class="text-muted text-sm" style="margin-top:2px;">covering {{ a.covered_physician }}</div>{% endif %}
+                  <div class="text-muted text-sm" style="margin-top:2px;">Rate: ${{ a.effective_daily_rate }}/day</div>
+                </div>
+                <a href="/coverage/{{ a.pk }}/delete/" class="btn btn-danger btn-sm" onclick="return confirm('Remove this assignment?')">✕</a>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div style="color:var(--red);font-size:13px;padding:4px 0;">
+                ⚠ Coverage needed —
+                <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" style="color:var(--teal);">Assign locum</a>
+              </div>
+            {% endif %}
+          </div>
+          {% elif item.assignments %}
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Additional Coverage</div>
+            {% for a in item.assignments %}
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;">
+              <div class="locum-tag">{{ a.covering_physician }}</div>
+              <a href="/coverage/{{ a.pk }}/delete/" class="btn btn-danger btn-sm" onclick="return confirm('Remove?')">✕</a>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if not item.clinic.regular_physicians.all and not item.assignments %}
+            <div class="empty-state">No physicians assigned. <a href="/clinics/{{ item.clinic.pk }}/edit/" style="color:var(--teal);">Edit clinic</a>.</div>
+          {% endif %}
+        </div>
+      </div>
+      {% empty %}
+      <div class="card empty-state" style="text-align:center;padding:2rem;">No clinics. <a href="/clinics/add/" style="color:var(--teal);">Add one</a>.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Available locums -->
+  <div>
+    <h3 style="margin-bottom:1rem;">Available Locums Today</h3>
+    <div class="card">
+      <div class="card-title">Not yet assigned on {{ view_date|date:"M j" }}</div>
+      {% for p in available_locums %}
+      <div class="flex items-center gap-3" style="padding:8px 0;border-bottom:1px solid var(--border);">
+        <div class="avatar avatar-locum">{{ p.first_name.0 }}{{ p.last_name.0 }}</div>
+        <div style="flex:1;">
+          <div style="font-weight:500;font-size:13.5px;">{{ p }}</div>
+          <div class="text-muted text-sm">
+            
+            {% if p.daily_rate %} · ${{ p.daily_rate }}/day{% endif %}
+          </div>
+        </div>
+        <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" class="btn btn-ghost btn-sm">Assign</a>
+      </div>
+      {% empty %}
+      <div class="empty-state">No unassigned locums.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

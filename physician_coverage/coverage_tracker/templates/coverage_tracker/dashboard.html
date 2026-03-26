@@ -1,0 +1,192 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Dashboard — PhysicianCoverage{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Dashboard</h1>
+    <p class="text-muted text-sm mt-1">{{ today|date:"l, F j, Y" }}</p>
+  </div>
+  <div class="flex gap-2">
+    <form method="get" style="display:flex;gap:8px;align-items:center;">
+      <label style="font-size:12px;color:var(--text-3);">Year</label>
+      <input type="number" name="year" value="{{ year }}" min="2020" max="2035" style="width:76px;background:var(--card);border:1px solid var(--border-2);border-radius:7px;color:var(--text);padding:5px 9px;font-size:13px;outline:none;">
+      <button type="submit" class="btn btn-ghost btn-sm">Go</button>
+    </form>
+    <a href="/time-off/add/" class="btn btn-ghost">+ Time Off</a>
+    <a href="/coverage/add/" class="btn btn-primary">+ Assign Locum</a>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Regular Physicians</div>
+    <div class="stat-value" style="color:var(--teal);">{{ regular_physicians.count }}</div>
+    <div class="stat-sub">active staff</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Locum Pool</div>
+    <div class="stat-value" style="color:var(--purple);">{{ locum_physicians.count }}</div>
+    <div class="stat-sub">covering physicians</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Out Today</div>
+    <div class="stat-value" style="color:var(--red);">{{ out_today.count }}</div>
+    <div class="stat-sub">on approved leave</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">{{ year }} Locum Days</div>
+    <div class="stat-value" style="color:var(--amber);">{{ total_locum_days }}</div>
+    <div class="stat-sub">coverage shifts</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">{{ year }} Locum Cost</div>
+    <div class="stat-value" style="color:var(--amber); font-size:20px;">${{ total_locum_cost|floatformat:0 }}</div>
+    <div class="stat-sub">total spend</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Pending Requests</div>
+    <div class="stat-value" style="color:var(--amber);">{{ pending.count }}</div>
+    <div class="stat-sub">awaiting approval</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <!-- Vacation balances -->
+  <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>{{ year }} Vacation Balances — Regular Physicians</span>
+      <a href="/physicians/?type=regular&year={{ year }}" class="btn btn-ghost btn-sm">View all</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Physician</th><th>Used</th><th>Left</th><th></th></tr></thead>
+        <tbody>
+          {% for s in physician_summaries %}
+          <tr>
+            <td>
+              <a href="/physicians/{{ s.physician.pk }}/" style="color:var(--text);text-decoration:none;font-weight:500;">
+                Dr. {{ s.physician.last_name }}
+              </a>
+              {% if s.days_pending > 0 %}<span class="badge badge-pending" style="margin-left:6px;">{{ s.days_pending }}d pend.</span>{% endif %}
+            </td>
+            <td style="font-family:'DM Mono',monospace;">{{ s.days_taken }}</td>
+            <td>
+              <span style="color:{% if s.days_remaining <= 3 %}var(--red){% elif s.days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};font-weight:500;font-family:'DM Mono',monospace;">{{ s.days_remaining }}</span>
+              <span class="text-muted"> / {{ s.total }}</span>
+            </td>
+            <td style="width:80px;">
+              {% if s.total > 0 %}
+              <div class="progress-wrap">
+                <div class="progress-bar {% if s.days_remaining <= 3 %}red{% elif s.days_remaining <= 7 %}amber{% else %}green{% endif %}" style="width:{% widthratio s.days_taken s.total 100 %}%"></div>
+              </div>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty-state">No regular physicians.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Locum cost summary -->
+  <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>{{ year }} Locum Cost Summary</span>
+      <a href="/locum-costs/?year={{ year }}" class="btn btn-ghost btn-sm">Full report</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Locum</th><th>Rate/Day</th><th>Days</th><th>Cost</th></tr></thead>
+        <tbody>
+          {% for s in locum_summaries %}
+          <tr>
+            <td>
+              <a href="/physicians/{{ s.physician.pk }}/" style="color:var(--text);text-decoration:none;font-weight:500;">
+                Dr. {{ s.physician.last_name }}
+              </a>
+              {% if s.physician.agency %}<div class="text-muted text-sm">{{ s.physician.agency }}</div>{% endif %}
+            </td>
+            <td class="money text-muted">${{ s.physician.daily_rate|default:"—" }}</td>
+            <td style="font-family:'DM Mono',monospace;">{{ s.days }}</td>
+            <td style="color:var(--amber);font-family:'DM Mono',monospace;font-weight:500;">${{ s.cost|floatformat:0 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty-state">No locum physicians added yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="two-col" style="margin-top:1.25rem;">
+  <!-- Out today + today's coverage -->
+  <div>
+    <div class="card" style="margin-bottom:1.25rem;">
+      <div class="card-title">Out Today</div>
+      {% if out_today %}
+        {% for req in out_today %}
+        <div class="flex items-center gap-3" style="padding:8px 0;border-bottom:1px solid var(--border);">
+          <div class="avatar avatar-regular">{{ req.physician.first_name.0 }}{{ req.physician.last_name.0 }}</div>
+          <div>
+            <div style="font-weight:500;font-size:13.5px;">{{ req.physician }}</div>
+            <div class="text-muted text-sm">{{ req.get_request_type_display }} · back {{ req.end_date|date:"M j" }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">All physicians present today.</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <div class="card-title">Locum Coverage Today</div>
+      {% if todays_coverage %}
+        {% for a in todays_coverage %}
+        <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+          <div style="font-weight:500;font-size:13.5px;">{{ a.clinic }}</div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="locum-tag">{{ a.covering_physician }}</span>
+            {% if a.covered_physician %}<span class="text-muted text-sm">covering {{ a.covered_physician }}</span>{% endif %}
+          </div>
+          {% if a.effective_daily_rate %}<div class="text-muted text-sm" style="margin-top:3px;">Rate: ${{ a.effective_daily_rate }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">No locum assignments today.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Pending requests -->
+  <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>Pending Time Off Requests</span>
+      <a href="/time-off/?status=pending" class="btn btn-ghost btn-sm">View all</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Physician</th><th>Dates</th><th>Days</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for req in pending %}
+          <tr>
+            <td><strong>{{ req.physician }}</strong></td>
+            <td class="text-muted">{{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}</td>
+            <td>{{ req.duration_days }}</td>
+            <td>
+              <div class="flex gap-2">
+                <a href="/time-off/{{ req.pk }}/approve/" class="btn btn-success btn-sm">✓ Approve</a>
+                <a href="/time-off/{{ req.pk }}/deny/" class="btn btn-danger btn-sm">✗</a>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty-state">No pending requests.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Locum Costs — {{ year }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Locum Cost Report</h1>
+    <p class="text-muted text-sm mt-1">Coverage cost tracking for locum physicians</p>
+  </div>
+  <form method="get" style="display:flex;gap:8px;align-items:center;">
+    <select name="year" class="form-control" style="width:90px;">
+      {% for y in years %}
+      <option value="{{ y }}" {% if y == year|stringformat:"i" %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
+    <select name="month" class="form-control" style="width:130px;">
+      <option value="">All months</option>
+      {% for m in months %}
+      <option value="{{ m.num }}" {% if m.num|stringformat:"i" == month_filter %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="/locum-costs/?year={{ year }}" class="btn btn-ghost">Clear</a>
+  </form>
+</div>
+
+<!-- Summary stat cards -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Cost</div>
+    <div class="stat-value" style="color:var(--amber);font-size:20px;">${{ grand_total|floatformat:0 }}</div>
+    <div class="stat-sub">{% if month_filter %}this month{% else %}{{ year }} YTD{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Days</div>
+    <div class="stat-value" style="color:var(--purple);">{{ grand_days }}</div>
+    <div class="stat-sub">coverage shifts</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Locums Active</div>
+    <div class="stat-value"> {{assigned_count}} </div>
+    <div class="stat-sub">with assignments</div>
+  </div>
+  {% if grand_days > 0 %}
+  <div class="stat-card">
+    <div class="stat-label">Avg Cost / Day</div>
+    <div class="stat-value" style="font-size:20px;">${{ grand_total|floatformat:0 }}</div>
+    <div class="stat-sub">blended rate</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="two-col" style="align-items:start;">
+
+  <!-- Per-locum summary -->
+  <div class="card">
+    <div class="card-title">Cost by Locum Physician — {{ year }}{% if month_filter %} / {{ month_filter }}{% endif %}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Physician</th><th>Agency</th><th>Rate/Day</th><th>Days</th><th>Total Cost</th></tr></thead>
+        <tbody>
+          {% for s in locum_data %}
+          <tr>
+            <td>
+              <a href="/physicians/{{ s.physician.pk }}/" style="color:var(--text);text-decoration:none;font-weight:500;">{{ s.physician }}</a>
+            </td>
+            <td class="text-muted">{{ s.physician.agency|default:"—" }}</td>
+            <td class="money">{% if s.standard_rate %}${{ s.standard_rate }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            <td style="font-family:'DM Mono',monospace;">{{ s.days }}</td>
+            <td>
+              <span style="color:{% if s.cost > 0 %}var(--amber){% else %}var(--text-3){% endif %};font-family:'DM Mono',monospace;font-weight:500;">
+                ${{ s.cost|floatformat:0 }}
+              </span>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="empty-state">No locum physicians in system.</td></tr>
+          {% endfor %}
+        </tbody>
+        {% if grand_total > 0 %}
+        <tfoot>
+          <tr style="border-top:2px solid var(--border-2);">
+            <td colspan="3" style="padding:10px 12px;font-weight:600;color:var(--text);">Total</td>
+            <td style="padding:10px 12px;font-family:'DM Mono',monospace;font-weight:600;color:var(--text);">{{ grand_days }}</td>
+            <td style="padding:10px 12px;font-family:'DM Mono',monospace;font-weight:600;color:var(--amber);">${{ grand_total|floatformat:0 }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+
+  <!-- Monthly breakdown -->
+  <div class="card">
+    <div class="card-title">Monthly Breakdown — {{ year }}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Month</th><th>Days</th><th>Cost</th><th></th></tr></thead>
+        <tbody>
+          {% for m in months %}
+          <tr style="{% if m.num|stringformat:"i" == month_filter %}background:rgba(155,127,232,0.07);{% endif %}">
+            <td>
+              <a href="/locum-costs/?year={{ year }}&month={{ m.num }}" style="color:var(--text);text-decoration:none;font-weight:{% if m.days > 0 %}500{% else %}400{% endif %};">{{ m.name }}</a>
+            </td>
+            <td style="font-family:'DM Mono',monospace;color:{% if m.days > 0 %}var(--text){% else %}var(--text-3){% endif %};">{{ m.days }}</td>
+            <td style="color:{% if m.cost > 0 %}var(--amber){% else %}var(--text-3){% endif %};font-family:'DM Mono',monospace;">
+              ${{ m.cost|floatformat:0 }}
+            </td>
+            <td style="width:100px;">
+              {% if grand_total > 0 and m.cost > 0 %}
+              <div class="progress-wrap">
+                <div class="progress-bar amber" style="width:{% widthratio m.cost grand_total 100 %}%"></div>
+              </div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Assignment detail table -->
+<div class="card" style="margin-top:1.25rem;">
+  <div class="card-title">Assignment Detail</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Locum</th><th>Clinic</th><th>Covering</th><th>Rate</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for a in assignments %}
+        <tr>
+          <td><strong>{{ a.date|date:"M j, Y" }}</strong></td>
+          <td>
+            <a href="/physicians/{{ a.covering_physician.pk }}/" style="color:var(--text);text-decoration:none;font-weight:500;">{{ a.covering_physician }}</a>
+          </td>
+          <td>{{ a.clinic }}</td>
+          <td class="text-muted">{{ a.covered_physician|default:"—" }}</td>
+          <td class="money" style="color:var(--amber);">${{ a.effective_daily_rate }}{% if a.daily_rate_override %} <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);margin-left:4px;">override</span>{% endif %}</td>
+          <td class="text-muted text-sm">{{ a.notes|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="text-align:center;padding:2rem;" class="empty-state">No assignments found for this period.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Approved Time Off Coverage{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Approved Time Off Coverage</h1>
+    <p style="color:var(--text-3); font-size:13px; margin-top:4px;">
+      View all approved time off and manage per-day locum coverage.
+    </p>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <form method="get" style="display:flex; gap:8px; align-items:center;">
+      <select name="year" class="form-control" style="width:auto;" onchange="this.form.submit()">
+        {% for y in years %}
+          <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a href="/time-off/" class="btn btn-ghost">← All Time Off</a>
+  </div>
+</div>
+
+{% if not enriched %}
+  <div class="card" style="text-align:center; padding:3rem;">
+    <p class="empty-state">No approved time off found for {{ year }}.</p>
+  </div>
+{% else %}
+
+<!-- Needs Coverage -->
+{% for item in enriched %}{% if not item.has_full_coverage %}
+{% if forloop.first %}
+<h2 style="display:flex; align-items:center; gap:8px; margin-bottom:1rem;">
+  <span style="width:8px;height:8px;background:var(--amber);border-radius:50%;display:inline-block;"></span>
+  Needs Coverage
+</h2>
+{% endif %}
+<div class="card" style="margin-bottom:0.75rem; border-color:rgba(245,166,35,0.25);">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <div style="display:flex; gap:1rem; align-items:flex-start; flex:1; min-width:0;">
+      <div class="avatar avatar-regular" style="margin-top:2px; flex-shrink:0;">
+        {{ item.request.physician.first_name.0 }}{{ item.request.physician.last_name.0 }}
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:500; color:var(--text);">
+          <a href="/physicians/{{ item.request.physician.pk }}/" style="color:var(--text); text-decoration:none;">{{ item.request.physician }}</a>
+        </div>
+        <div style="font-size:12.5px; color:var(--text-3); margin-top:2px;">
+          {{ item.request.start_date|date:"M j" }} – {{ item.request.end_date|date:"M j, Y" }}
+          &nbsp;·&nbsp; {{ item.duration }} day{{ item.duration|pluralize }}
+          &nbsp;·&nbsp; {{ item.request.get_request_type_display }}
+        </div>
+
+        {% if item.has_partial_coverage %}
+        <span class="badge badge-assigned" style="font-size:11px; margin-top:8px;">Partial Coverage — {{ item.uncovered_dates|length }} day{{ item.uncovered_dates|length|pluralize }} uncovered</span>
+        {% endif %}
+
+        <!-- Per-day coverage grid -->
+        <div style="margin-top:12px; display:flex; flex-direction:column; gap:5px;">
+          {% for day_info in item.day_coverage %}
+          <div style="display:flex; align-items:center; gap:10px; font-size:12.5px;">
+            <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:{% if day_info.assignment %}var(--green){% else %}var(--amber){% endif %};"></span>
+            <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+            {% if day_info.assignment %}
+              <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
+                {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
+                <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
+              </span>
+            {% else %}
+              <span style="color:var(--amber); font-size:12px; font-style:italic;">No locum assigned</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <a href="/time-off/{{ item.request.pk }}/assign-locum/" class="btn btn-primary btn-sm" style="white-space:nowrap; flex-shrink:0;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      Edit Coverage
+    </a>
+  </div>
+</div>
+{% endif %}{% endfor %}
+
+<!-- Fully Covered -->
+{% for item in enriched %}{% if item.has_full_coverage %}
+{% if forloop.first %}
+<h2 style="display:flex; align-items:center; gap:8px; margin-top:1.75rem; margin-bottom:1rem;">
+  <span style="width:8px;height:8px;background:var(--green);border-radius:50%;display:inline-block;"></span>
+  Fully Covered
+</h2>
+{% endif %}
+<div class="card" style="margin-bottom:0.75rem; border-color:rgba(46,194,126,0.15);">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <div style="display:flex; gap:1rem; align-items:flex-start; flex:1; min-width:0;">
+      <div class="avatar avatar-regular" style="margin-top:2px; flex-shrink:0;">
+        {{ item.request.physician.first_name.0 }}{{ item.request.physician.last_name.0 }}
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:500; color:var(--text);">
+          <a href="/physicians/{{ item.request.physician.pk }}/" style="color:var(--text); text-decoration:none;">{{ item.request.physician }}</a>
+        </div>
+        <div style="font-size:12.5px; color:var(--text-3); margin-top:2px;">
+          {{ item.request.start_date|date:"M j" }} – {{ item.request.end_date|date:"M j, Y" }}
+          &nbsp;·&nbsp; {{ item.duration }} day{{ item.duration|pluralize }}
+          &nbsp;·&nbsp; {{ item.request.get_request_type_display }}
+        </div>
+
+        <!-- Per-day coverage grid -->
+        <div style="margin-top:12px; display:flex; flex-direction:column; gap:5px;">
+          {% for day_info in item.day_coverage %}
+          <div style="display:flex; align-items:center; gap:10px; font-size:12.5px;">
+            <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);"></span>
+            <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+            <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
+              {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
+              <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; flex-shrink:0;">
+      <span class="badge badge-approved">✓ Fully Covered</span>
+      <a href="/time-off/{{ item.request.pk }}/assign-locum/" class="btn btn-ghost btn-sm" style="white-space:nowrap;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Edit
+      </a>
+    </div>
+  </div>
+</div>
+{% endif %}{% endfor %}
+
+{% endif %}
+{% endblock %}

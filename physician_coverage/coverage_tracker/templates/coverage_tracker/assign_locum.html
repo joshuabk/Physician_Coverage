@@ -1,0 +1,99 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Coverage – {{ req.physician }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Edit Coverage — {{ req.physician }}</h1>
+    <p style="color:var(--text-3); font-size:13px; margin-top:4px;">
+      {{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}
+      &nbsp;·&nbsp; {{ req.duration_days }} day{{ req.duration_days|pluralize }}
+      &nbsp;·&nbsp; {{ req.get_request_type_display }}
+    </p>
+  </div>
+  <a href="/time-off/approved-coverage/" class="btn btn-ghost">← Back to Coverage</a>
+</div>
+
+<form method="post" action="/time-off/{{ req.pk }}/assign-locum/">
+  {% csrf_token %}
+
+  <div style="display:flex; gap:16px; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap;">
+    <span style="font-size:12.5px; color:var(--text-3);">Assign a locum and clinic to each day individually. Leave blank to skip a day. Check "Clear" to remove existing coverage.</span>
+    <div style="display:flex; gap:10px; margin-left:auto;">
+      <span style="display:flex; align-items:center; gap:5px; font-size:12px; color:var(--green);"><span style="width:8px;height:8px;background:var(--green);border-radius:50%;display:inline-block;"></span>Covered</span>
+      <span style="display:flex; align-items:center; gap:5px; font-size:12px; color:var(--amber);"><span style="width:8px;height:8px;background:var(--amber);border-radius:50%;display:inline-block;"></span>Uncovered</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
+    <table style="width:100%;">
+      <thead>
+        <tr>
+          <th style="width:150px;">Date</th>
+          <th>Locum Physician</th>
+          <th>Clinic</th>
+          <th style="width:80px; text-align:center;">Clear</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in day_rows %}
+        {% with date_key=row.date|date:"Y-m-d" %}
+        <tr style="{% if row.is_covered %}background:rgba(46,194,126,0.04);{% else %}background:rgba(245,166,35,0.03);{% endif %}">
+          <td>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:{% if row.is_covered %}var(--green){% else %}var(--amber){% endif %};"></span>
+              <div>
+                <div style="font-weight:500; color:var(--text); font-size:13px;">{{ row.date|date:"D" }}</div>
+                <div style="font-size:12px; color:var(--text-3);">{{ row.date|date:"M j, Y" }}</div>
+              </div>
+            </div>
+          </td>
+          <td>
+            <select name="locum_{{ date_key }}" class="form-control" style="font-size:13px;">
+              <option value="">— No locum —</option>
+              {% for opt in row.locum_options %}
+              <option value="{{ opt.physician.pk }}"
+                {% if row.existing and row.existing.covering_physician.pk == opt.physician.pk %}selected{% endif %}>
+                {{ opt.physician }}{% if opt.physician.daily_rate %} (${{ opt.physician.daily_rate }}/day){% endif %}{% if opt.has_conflict %} ⚠ conflict{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select name="clinic_{{ date_key }}" class="form-control" style="font-size:13px;">
+              <option value="">— No clinic —</option>
+              {% for clinic in clinics %}
+              <option value="{{ clinic.pk }}"
+                {% if row.existing and row.existing.clinic.pk == clinic.pk %}selected{% elif not row.existing and default_clinic and default_clinic.pk == clinic.pk %}selected{% endif %}>
+                {{ clinic.name }}{% if clinic.location %} · {{ clinic.location }}{% endif %}{% if clinic in physician_clinics %} ★{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </td>
+          <td style="text-align:center;">
+            {% if row.is_covered %}
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:var(--red);">
+              <input type="checkbox" name="clear_{{ date_key }}" value="1" style="accent-color:var(--red);">
+              Clear
+            </label>
+            {% else %}
+            <span style="color:var(--text-3);font-size:11px;">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endwith %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <button type="submit" class="btn btn-primary">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Coverage
+    </button>
+    <a href="/time-off/approved-coverage/" class="btn btn-ghost">Cancel</a>
+    <span style="font-size:12px; color:var(--text-3);">★ = physician's primary clinic &nbsp;·&nbsp; ⚠ = locum already assigned elsewhere that day</span>
+  </div>
+</form>
+{% endblock %}

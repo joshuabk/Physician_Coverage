@@ -1,0 +1,146 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}{{ physician }} — PhysicianCoverage{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="flex items-center gap-3">
+    <div class="avatar {% if physician.is_locum %}avatar-locum{% else %}avatar-regular{% endif %}" style="width:48px;height:48px;font-size:15px;">
+      {{ physician.first_name.0 }}{{ physician.last_name.0 }}
+    </div>
+    <div>
+      <div class="flex items-center gap-2">
+        <h1>{{ physician }}</h1>
+        <span class="badge {% if physician.is_locum %}badge-locum{% else %}badge-regular{% endif %}">
+          {% if physician.is_locum %}Locum{% else %}Regular{% endif %}
+        </span>
+      </div>
+      <p class="text-muted text-sm mt-1">
+        {{ physician.email }}
+        {% if physician.is_locum and physician.agency %} · {{ physician.agency }}{% endif %}
+      </p>
+    </div>
+  </div>
+  <div class="flex gap-2">
+    <a href="/physicians/{{ physician.pk }}/edit/" class="btn btn-ghost">Edit</a>
+    {% if physician.is_regular %}
+    <a href="/time-off/add/?physician={{ physician.pk }}" class="btn btn-primary">+ Time Off Request</a>
+    {% else %}
+    <a href="/coverage/add/" class="btn btn-primary">+ Assign Coverage</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if physician.is_regular %}
+<!-- Regular physician stats -->
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-label">Annual Allocation</div><div class="stat-value">{{ physician.total_vacation_days }}</div><div class="stat-sub">days / year</div></div>
+  <div class="stat-card"><div class="stat-label">Days Used ({{ year }})</div><div class="stat-value" style="color:var(--amber);">{{ days_taken }}</div><div class="stat-sub">approved leave</div></div>
+  <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value" style="color:var(--amber);">{{ days_pending }}</div><div class="stat-sub">awaiting approval</div></div>
+  <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value" style="color:{% if days_remaining <= 3 %}var(--red){% elif days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};">{{ days_remaining }}</div><div class="stat-sub">days available</div></div>
+</div>
+{% if physician.total_vacation_days > 0 %}
+<div class="card" style="margin-bottom:1.25rem;">
+  <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+    <span class="text-sm" style="color:var(--text-2);">Vacation used</span>
+    <span class="text-sm" style="color:var(--text-2);">{{ days_taken }} of {{ physician.total_vacation_days }} days</span>
+  </div>
+  <div class="progress-wrap" style="height:10px;">
+    <div class="progress-bar {% if days_remaining <= 3 %}red{% elif days_remaining <= 7 %}amber{% else %}green{% endif %}" style="width:{% widthratio days_taken physician.total_vacation_days 100 %}%"></div>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<!-- Locum physician stats -->
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-label">Daily Rate</div><div class="stat-value" style="font-size:20px;">{% if physician.daily_rate %}${{ physician.daily_rate }}{% else %}—{% endif %}</div><div class="stat-sub">standard rate</div></div>
+  <div class="stat-card"><div class="stat-label">Days Worked ({{ year }})</div><div class="stat-value" style="color:var(--purple);">{{ coverage_days }}</div><div class="stat-sub">coverage shifts</div></div>
+  <div class="stat-card"><div class="stat-label">Total Cost ({{ year }})</div><div class="stat-value" style="color:var(--amber);font-size:20px;">${{ coverage_cost|floatformat:0 }}</div><div class="stat-sub">total billed</div></div>
+</div>
+{% endif %}
+
+<div class="two-col">
+  {% if physician.is_regular %}
+  <!-- Time off requests -->
+  <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      Time Off History
+      <a href="/time-off/add/?physician={{ physician.pk }}" class="btn btn-ghost btn-sm">+ New</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for req in time_off_requests %}
+          <tr>
+            <td><strong>{{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}</strong></td>
+            <td class="text-muted">{{ req.get_request_type_display }}</td>
+            <td>{{ req.duration_days }}</td>
+            <td><span class="badge badge-{{ req.status }}">{{ req.get_status_display }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty-state">No time off requests.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Assigned clinics -->
+  <div class="card">
+    <div class="card-title">Assigned Clinics</div>
+    {% for clinic in assigned_clinics %}
+    <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="font-weight:500;font-size:13.5px;">{{ clinic.name }}</div>
+      {% if clinic.location %}<div class="text-muted text-sm">{{ clinic.location }}</div>{% endif %}
+    </div>
+    {% empty %}
+    <div class="empty-state">Not assigned to any clinics. <a href="/clinics/add/" style="color:var(--teal);">Edit a clinic</a> to assign.</div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <!-- Coverage assignments this year -->
+  <div class="card">
+    <div class="card-title">Coverage Assignments — {{ year }}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Clinic</th><th>Covering</th><th>Rate</th></tr></thead>
+        <tbody>
+          {% for a in coverage_this_year %}
+          <tr>
+            <td><strong>{{ a.date|date:"M j, Y" }}</strong></td>
+            <td>{{ a.clinic }}</td>
+            <td class="text-muted">{% if a.covered_physician %}{{ a.covered_physician }}{% else %}—{% endif %}</td>
+            <td class="money">${{ a.effective_daily_rate }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="empty-state">No assignments this year.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Upcoming availability -->
+  <div class="card">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      Upcoming Availability
+      <a href="/availability/mark/" class="btn btn-ghost btn-sm">+ Mark</a>
+    </div>
+    {% if availability %}
+      {% for avail in availability %}
+      <div class="flex items-center gap-3" style="padding:6px 0;border-bottom:1px solid var(--border);">
+        <span class="badge {% if avail.is_available %}badge-available{% else %}badge-off{% endif %}">
+          {% if avail.is_available %}Available{% else %}Unavailable{% endif %}
+        </span>
+        <span style="font-size:13px;">{{ avail.date|date:"D, M j" }}</span>
+        {% if avail.notes %}<span class="text-muted text-sm">· {{ avail.notes }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">No availability data recorded.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

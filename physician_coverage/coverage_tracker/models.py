@@ -1,0 +1,236 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.utils import timezone
+from datetime import date
+import datetime
+import calendar
+from decimal import Decimal
+
+
+def get_holidays(year):
+    holidays = []
+    
+    # Fixed holidays
+    holidays.append(date(year, 1, 1))   # New Year's Day
+    holidays.append(date(year, 7, 4))   # Independence Day
+    holidays.append(date(year, 12, 25)) # Christmas Day
+    may_cal = calendar.monthcalendar(year, 5)
+    last_monday_may = [week[0] for week in may_cal if week[0] != 0][-1]
+    holidays.append(date(year, 5, last_monday_may))
+    
+    # Labor Day: First Monday in September
+    sep_cal = calendar.monthcalendar(year, 9)
+    first_monday_sep = next(week[0] for week in sep_cal if week[0] != 0)
+    holidays.append(date(year, 9, first_monday_sep))
+    
+    # Thanksgiving: 4th Thursday in November
+    nov_cal = calendar.monthcalendar(year, 11)
+    thursdays = [week[3] for week in nov_cal if week[3] != 0]  # Thursday index = 3
+    fourth_thursday = thursdays[3]
+    holidays.append(date(year, 11, fourth_thursday))
+    
+    return sorted(holidays)
+
+
+HOLIDAYS = {
+    (1, 1),   # New Year's Day
+    (5, 25),  # Memorial Day
+    (7, 4),   # Independence Day
+    (9, 7),   # Labor Day
+    (11, 26), # Thanksgiving
+    (12, 25), # Christmas
+}
+
+def check_holiday(day):
+    is_holiday = (day.month, day.day) in HOLIDAYS
+    return is_holiday
+
+class Physician(models.Model):
+    PHYSICIAN_TYPE_CHOICES = [
+        ('regular', 'Regular Physician'),
+        ('locum', 'Locum / Covering Physician'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    email = models.EmailField(unique=True)
+    
+    physician_type = models.CharField(max_length=10, choices=PHYSICIAN_TYPE_CHOICES, default='regular')
+    total_vacation_days = models.PositiveIntegerField(
+        default=20,
+        help_text="Annual vacation day allocation (for regular physicians)"
+    )
+    daily_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Daily rate in USD (for locum physicians)"
+    )
+    agency = models.CharField(
+        max_length=200, blank=True,
+        help_text="Staffing agency name (for locum physicians)"
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['physician_type', 'last_name', 'first_name']
+
+    def __str__(self):
+        return f"Dr. {self.first_name} {self.last_name}"
+
+    @property
+    def is_locum(self):
+        return self.physician_type == 'locum'
+
+    @property
+    def is_regular(self):
+        return self.physician_type == 'regular'
+
+    def days_taken(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        total = 0
+        for req in TimeOffRequest.objects.filter(physician=self, status='approved', start_date__year=year):
+            total += (req.end_date - req.start_date).days + 1
+        return total
+
+    def days_remaining(self, year=None):
+        return self.total_vacation_days - self.days_taken(year)
+
+    def days_pending(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        total = 0
+        for req in TimeOffRequest.objects.filter(physician=self, status='pending', start_date__year=year):
+            total += (req.end_date - req.start_date).days + 1
+        return total
+
+    def total_coverage_days(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        return CoverageAssignment.objects.filter(covering_physician=self, date__year=year).count()
+
+    def total_coverage_cost(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        assignments = CoverageAssignment.objects.filter(covering_physician=self, date__year=year)
+        return sum(a.cost for a in assignments)
+
+
+class Clinic(models.Model):
+    name = models.CharField(max_length=200)
+    location = models.CharField(max_length=200, blank=True)
+    
+    regular_physicians = models.ManyToManyField(
+        'Physician',
+        blank=True,
+        related_name='assigned_clinics',
+        limit_choices_to={'physician_type': 'regular'},
+        help_text="Regular physicians permanently assigned to this clinic"
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class TimeOffRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+        ('cancelled', 'Cancelled'),
+        
+    ]
+    TYPE_CHOICES = [
+        ('vacation', 'Vacation'),
+        ('sick', 'Sick Leave'),
+        ('conference', 'Conference / CME'),
+        ('personal', 'Personal'),
+        ('other', 'Other'),
+    ]
+
+    physician = models.ForeignKey(Physician, on_delete=models.CASCADE, related_name='time_off_requests')
+    start_date = models.DateField()
+    end_date = models.DateField()
+    request_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='vacation')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-start_date']
+
+    def __str__(self):
+        return f"{self.physician} — {self.start_date} to {self.end_date}"
+
+    @property
+    def duration_days(self):
+        total = 0
+        current = self.start_date
+        year = self.start_date.year
+        holidays = get_holidays(year)
+        while current <= self.end_date:
+            if current.weekday() < 5 and not current in holidays:  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
+                total += 1
+            current += datetime.timedelta(days=1)
+        return total
+
+class CoverageAssignment(models.Model):
+    clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='coverage_assignments')
+    covering_physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='coverage_assignments',
+        limit_choices_to={'physician_type': 'locum'},
+        help_text="Locum physician providing coverage"
+    )
+    covered_physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='covered_assignments',
+        null=True, blank=True,
+        limit_choices_to={'physician_type': 'regular'},
+        help_text="Regular physician being covered (optional)"
+    )
+    date = models.DateField()
+    daily_rate_override = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Override the locum's standard daily rate for this specific assignment"
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date', 'clinic']
+        unique_together = ['clinic', 'covering_physician', 'date']
+
+    def __str__(self):
+        return f"{self.clinic} — {self.covering_physician} on {self.date}"
+
+    @property
+    def effective_daily_rate(self):
+        if self.daily_rate_override is not None:
+            return self.daily_rate_override
+        return self.covering_physician.daily_rate or Decimal('0.00')
+
+    @property
+    def cost(self):
+        return self.effective_daily_rate
+
+
+class PhysicianAvailability(models.Model):
+    physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='availability_slots',
+        limit_choices_to={'physician_type': 'locum'}
+    )
+    date = models.DateField()
+    is_available = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['date', 'physician']
+        unique_together = ['physician', 'date']
+
+    def __str__(self):
+        status = "Available" if self.is_available else "Unavailable"
+        return f"{self.physician} — {self.date} ({status})"

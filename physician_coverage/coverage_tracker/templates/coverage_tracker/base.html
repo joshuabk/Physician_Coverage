@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Physician Coverage{% endblock %}</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy: #0f1b2d; --navy-2: #1a2d47; --navy-3: #243d61;
+      --teal: #00b8a9; --teal-light: #00d4c3;
+      --amber: #f5a623; --red: #e05454; --green: #2ec27e; --purple: #9b7fe8;
+      --text: #e8edf4; --text-2: #94a8c0; --text-3: #5c7a99;
+      --border: rgba(255,255,255,0.07); --border-2: rgba(255,255,255,0.13);
+      --card: rgba(255,255,255,0.04); --card-hover: rgba(255,255,255,0.07);
+      --radius: 10px; --radius-lg: 16px;
+    }
+    body { font-family: 'DM Sans', sans-serif; background: var(--navy); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.6; }
+    nav { background: var(--navy-2); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; gap: 2rem; height: 56px; position: sticky; top: 0; z-index: 100; }
+    .nav-brand { font-size: 15px; font-weight: 600; color: var(--teal); text-decoration: none; letter-spacing: -0.2px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .nav-brand svg { width: 20px; height: 20px; }
+    .nav-links { display: flex; align-items: center; gap: 4px; list-style: none; }
+    .nav-links a { color: var(--text-2); text-decoration: none; font-size: 13.5px; padding: 6px 12px; border-radius: 6px; transition: all 0.15s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--card-hover); }
+    .nav-spacer { flex: 1; }
+    main { max-width: 1280px; margin: 0 auto; padding: 2rem; }
+    h1 { font-size: 22px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
+    h2 { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
+    h3 { font-size: 14px; font-weight: 500; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.6px; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; }
+    .card-title { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-3); margin-bottom: 0.75rem; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 7px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.15s; border: 1px solid transparent; white-space: nowrap; }
+    .btn-primary { background: var(--teal); color: var(--navy); border-color: var(--teal); }
+    .btn-primary:hover { background: var(--teal-light); }
+    .btn-ghost { background: transparent; color: var(--text-2); border-color: var(--border-2); }
+    .btn-ghost:hover { background: var(--card-hover); color: var(--text); }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-success { background: rgba(46,194,126,0.15); color: var(--green); border-color: rgba(46,194,126,0.3); }
+    .btn-success:hover { background: rgba(46,194,126,0.25); }
+    .btn-danger { background: rgba(224,84,84,0.15); color: var(--red); border-color: rgba(224,84,84,0.3); }
+    .btn-danger:hover { background: rgba(224,84,84,0.25); }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+    .badge-regular { background: rgba(0,184,169,0.15); color: var(--teal); }
+    .badge-locum { background: rgba(155,127,232,0.15); color: var(--purple); }
+    .badge-pending { background: rgba(245,166,35,0.15); color: var(--amber); }
+    .badge-approved { background: rgba(46,194,126,0.15); color: var(--green); }
+    .badge-denied { background: rgba(224,84,84,0.15); color: var(--red); }
+    .badge-cancelled { background: rgba(94,122,153,0.2); color: var(--text-3); }
+    .badge-available { background: rgba(0,184,169,0.15); color: var(--teal); }
+    .badge-off { background: rgba(224,84,84,0.15); color: var(--red); }
+    .badge-assigned { background: rgba(245,166,35,0.15); color: var(--amber); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead th { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-3); padding: 0 12px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--card-hover); }
+    tbody td { padding: 11px 12px; color: var(--text-2); }
+    tbody td strong { color: var(--text); font-weight: 500; }
+    .progress-wrap { background: rgba(255,255,255,0.06); border-radius: 99px; height: 6px; overflow: hidden; }
+    .progress-bar { height: 100%; border-radius: 99px; transition: width 0.4s ease; }
+    .progress-bar.green { background: var(--green); }
+    .progress-bar.amber { background: var(--amber); }
+    .progress-bar.red { background: var(--red); }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 1.75rem; }
+    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; }
+    .stat-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-3); margin-bottom: 6px; }
+    .stat-value { font-size: 26px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; letter-spacing: -0.5px; }
+    .stat-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 900px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+    .messages { list-style: none; margin-bottom: 1rem; }
+    .messages li { padding: 10px 16px; border-radius: var(--radius); font-size: 13.5px; margin-bottom: 8px; }
+    .messages .success { background: rgba(46,194,126,0.15); color: var(--green); border: 1px solid rgba(46,194,126,0.3); }
+    .messages .warning { background: rgba(245,166,35,0.15); color: var(--amber); border: 1px solid rgba(245,166,35,0.3); }
+    .messages .error { background: rgba(224,84,84,0.15); color: var(--red); border: 1px solid rgba(224,84,84,0.3); }
+    .form-group { margin-bottom: 1.1rem; }
+    .form-group label { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+    .form-control { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--border-2); border-radius: 7px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; padding: 8px 12px; transition: border-color 0.15s; outline: none; }
+    .form-control:focus { border-color: var(--teal); }
+    .form-control option { background: var(--navy-2); }
+    textarea.form-control { resize: vertical; min-height: 80px; }
+    .clinic-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+    .clinic-card-header { padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .clinic-card-body { padding: 0.9rem 1.1rem; }
+    .doc-tag { display: inline-flex; align-items: center; gap: 6px; background: rgba(0,184,169,0.1); border: 1px solid rgba(0,184,169,0.2); border-radius: 6px; padding: 5px 10px; font-size: 12.5px; color: var(--teal); margin: 3px 0; }
+    .locum-tag { display: inline-flex; align-items: center; gap: 6px; background: rgba(155,127,232,0.1); border: 1px solid rgba(155,127,232,0.2); border-radius: 6px; padding: 5px 10px; font-size: 12.5px; color: var(--purple); margin: 3px 0; }
+    .empty-state { padding: 1rem 0; color: var(--text-3); font-size: 13px; font-style: italic; }
+    .date-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 1.5rem; }
+    .date-nav input[type="date"] { background: var(--card); border: 1px solid var(--border-2); border-radius: 7px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13.5px; padding: 6px 10px; outline: none; cursor: pointer; }
+    .date-nav input[type="date"]:focus { border-color: var(--teal); }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border-2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .avatar-regular { background: rgba(0,184,169,0.15); color: var(--teal); }
+    .avatar-locum { background: rgba(155,127,232,0.15); color: var(--purple); }
+    .type-tabs { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; margin-bottom: 1.5rem; width: fit-content; }
+    .type-tab { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; text-decoration: none; color: var(--text-3); transition: all 0.15s; }
+    .type-tab.active { background: var(--navy-3); color: var(--text); }
+    .type-tab:hover:not(.active) { color: var(--text-2); }
+    .divider { height: 1px; background: var(--border); margin: 1.25rem 0; }
+    .text-muted { color: var(--text-3); }
+    .text-sm { font-size: 12.5px; }
+    .mt-1 { margin-top: 0.5rem; }
+    .mt-2 { margin-top: 1rem; }
+    .mb-1 { margin-bottom: 0.5rem; }
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-3 { gap: 0.75rem; }
+    .money { font-family: 'DM Mono', monospace; }
+  </style>
+</head>
+<body>
+<nav>
+  <a href="/" class="nav-brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+    PhysicianCoverage
+  </a>
+  <ul class="nav-links">
+    <li><a href="/" {% if request.resolver_match.url_name == 'dashboard' %}class="active"{% endif %}>Dashboard</a></li>
+    <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
+    <li><a href="/time-off/" {% if 'time_off' in request.resolver_match.url_name and request.resolver_match.url_name != 'approved_time_off_coverage' and request.resolver_match.url_name != 'assign_locum_to_time_off' %}class="active"{% endif %}>Time Off</a></li>
+    <li><a href="/time-off/approved-coverage/" {% if request.resolver_match.url_name == 'approved_time_off_coverage' or request.resolver_match.url_name == 'assign_locum_to_time_off' %}class="active"{% endif %} ">Coverage</a></li>
+    <li><a href="/clinics/" {% if 'clinic' in request.resolver_match.url_name %}class="active"{% endif %}>Clinics</a></li>
+    <li><a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a></li>
+    <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
+  </ul>
+  <div class="nav-spacer"></div>
+  <a href="/admin/" class="btn btn-ghost btn-sm">Admin</a>
+</nav>
+<main>
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
