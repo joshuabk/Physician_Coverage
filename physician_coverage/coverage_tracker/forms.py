@@ -30,6 +30,14 @@ class ClinicForm(forms.ModelForm):
             'regular_physicians': forms.CheckboxSelectMultiple(),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['regular_physicians'].queryset = Physician.objects.filter(
+            is_active=True, physician_type__in=['regular', 'psa']
+        ).order_by('physician_type', 'last_name', 'first_name')
+        self.fields['regular_physicians'].label = 'Assigned Physicians'
+        self.fields['regular_physicians'].help_text = 'Select regular and/or PSA physicians for this clinic.'
+
 
 class TimeOffRequestForm(forms.ModelForm):
     class Meta:
@@ -47,7 +55,7 @@ class TimeOffRequestForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['physician'].queryset = Physician.objects.filter(
-            is_active=True, physician_type='regular'
+            is_active=True,  physician_type__in=['regular', 'psa']
         )
 
     def clean(self):

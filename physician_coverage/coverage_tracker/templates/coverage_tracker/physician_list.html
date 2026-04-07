@@ -9,16 +9,19 @@
     </p>
   </div>
   <div class="flex gap-2">
-    {% if physician_type == 'regular' %}
+  
+{% if physician_type == 'regular' or  physician_type == 'psa' %}
     <form method="get" style="display:flex;gap:8px;align-items:center;">
       <input type="hidden" name="type" value="regular">
       <input type="number" name="year" value="{{ year }}" min="2020" max="2035" style="width:76px;background:var(--card);border:1px solid var(--border-2);border-radius:7px;color:var(--text);padding:5px 9px;font-size:13px;outline:none;">
       <button type="submit" class="btn btn-ghost btn-sm">Go</button>
     </form>
     {% endif %}
+    {% if is_admin %}
     <a href="/physicians/add/?type={{ physician_type }}" class="btn btn-primary">
       + Add {% if physician_type == 'locum' %}Locum{% else %}Physician{% endif %}
     </a>
+    {% endif %}
   </div>
 </div>
 
@@ -26,12 +29,22 @@
   <a href="/physicians/?type=regular&year={{ year }}" class="type-tab {% if physician_type == 'regular' %}active{% endif %}">
     Regular Physicians
   </a>
+  {% if is_admin %}
   <a href="/physicians/?type=locum" class="type-tab {% if physician_type == 'locum' %}active{% endif %}">
     Locum Physicians
   </a>
+  {% endif %}
+  <a href="/physicians/?type=psa&year={{ year }}" class="type-tab {% if physician_type == 'psa' %}active{% endif %}">
+    PSA Physicians
+  </a>
+  {% if physician_type == 'psa' %}
+  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="type-tab" style="margin-left:8px;border-left:2px solid var(--border-2);padding-left:12px;">
+    📋 Track # of Requested Coverage Days
+  </a>
+  {% endif %}
 </div>
 
-{% if physician_type == 'regular' %}
+{% if physician_type == 'psa' or physician_type == 'regular' %}
 <div class="card">
   <div class="table-wrap">
     <table>

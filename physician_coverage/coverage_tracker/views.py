@@ -7,11 +7,18 @@ from decimal import Decimal
 import datetime
 import calendar
 
-from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.forms import AuthenticationForm
+
+from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability, CoverageRequest, UserProfile
 from .forms import (
     TimeOffRequestForm, CoverageAssignmentForm,
     PhysicianAvailabilityForm, PhysicianForm, ClinicForm
 )
+from .decorators import login_required_custom, admin_required
+
+
+#admin pass:Abk-****  user: superuser
 
 def get_holidays(year):
     holidays = []
@@ -51,6 +58,7 @@ def check_holiday(day):
 
 
 
+@login_required_custom
 def dashboard(request):
     today = date.today()
     year = int(request.GET.get('year', today.year))
@@ -103,6 +111,8 @@ def dashboard(request):
             'cost': cost,
         })
 
+    is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
+
     context = {
         'year': year,
         'today': today,
@@ -113,15 +123,18 @@ def dashboard(request):
         'upcoming': upcoming,
         'pending': pending,
         'physician_summaries': physician_summaries,
-        'locum_summaries': locum_summaries,
-        'total_locum_cost': total_locum_cost,
-        'total_locum_days': total_locum_days,
+        'locum_summaries': locum_summaries if is_admin else [],
+        'total_locum_cost': total_locum_cost if is_admin else None,
+        'total_locum_days': total_locum_days if is_admin else None,
+        'is_admin': is_admin,
     }
     return render(request, 'coverage_tracker/dashboard.html', context)
 
 
+@login_required_custom
 def physician_list(request):
     physician_type = request.GET.get('type', 'regular')
+    sub_tab = request.GET.get('sub', 'list')  # 'list' or 'coverage_days' for PSA
     year = int(request.GET.get('year', date.today().year))
     physicians = Physician.objects.filter(is_active=True, physician_type=physician_type)
 
@@ -136,6 +149,16 @@ def physician_list(request):
                 'total': p.total_vacation_days,
                 'clinics': p.assigned_clinics.filter(is_active=True),
             })
+        elif p.is_psa:
+            summaries.append({
+                'physician': p,
+                'days_taken': p.days_taken(year),
+                'days_pending': p.days_pending(year),
+                'days_remaining': p.days_remaining(year),
+                'total': p.total_vacation_days,
+                'clinics': p.assigned_clinics.filter(is_active=True),
+                'requested_days': p.requested_coverage_days(year),
+            })
         else:
             summaries.append({
                 'physician': p,
@@ -144,13 +167,38 @@ def physician_list(request):
                 'clinics': [],
             })
 
+    # For PSA coverage_days sub-tab, gather per-physician coverage request data
+    psa_coverage_data = []
+    if physician_type == 'psa' and sub_tab == 'coverage_days':
+        for s in summaries:
+            requests = CoverageRequest.objects.filter(
+                physician=s['physician'], requested_date__year=year
+            ).order_by('requested_date')
+            psa_coverage_data.append({
+                'physician': s['physician'],
+                'requests': requests,
+                'total': requests.count(),
+            })
+
+    is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
+
+    # Physicians cannot view the locum tab at all
+    if physician_type == 'locum' and not is_admin:
+        from django.http import HttpResponseForbidden
+        messages.error(request, 'You do not have permission to view locum physician details.')
+        return redirect('physician_list')
+
     return render(request, 'coverage_tracker/physician_list.html', {
         'summaries': summaries,
         'year': year,
         'physician_type': physician_type,
+        'sub_tab': sub_tab,
+        'psa_coverage_data': psa_coverage_data,
+        'is_admin': is_admin,
     })
 
 
+@login_required_custom
 def physician_detail(request, pk):
     physician = get_object_or_404(Physician, pk=pk)
     year = int(request.GET.get('year', date.today().year))
@@ -166,16 +214,19 @@ def physician_detail(request, pk):
     coverage_this_year = CoverageAssignment.objects.filter(
         covering_physician=physician, date__year=year
     ).select_related('clinic')
+    
+    is_regular_like = physician.is_regular or physician.is_psa
+
 
     context = {
         'physician': physician,
         'year': year,
-        'days_taken': physician.days_taken(year) if physician.is_regular else None,
-        'days_remaining': physician.days_remaining(year) if physician.is_regular else None,
-        'days_pending': physician.days_pending(year) if physician.is_regular else None,
+        'days_taken': physician.days_taken(year) if is_regular_like else None,
+        'days_remaining': physician.days_remaining(year) if is_regular_like else None,
+        'days_pending': physician.days_pending(year) if is_regular_like else None,
         'coverage_days': physician.total_coverage_days(year) if physician.is_locum else None,
         'coverage_cost': physician.total_coverage_cost(year) if physician.is_locum else None,
-        'assigned_clinics': physician.assigned_clinics.all() if physician.is_regular else [],
+        'assigned_clinics': physician.assigned_clinics.all() if is_regular_like else [],
         'time_off_requests': time_off_requests,
         'coverage': coverage[:20],
         'coverage_this_year': coverage_this_year,
@@ -184,6 +235,7 @@ def physician_detail(request, pk):
     return render(request, 'coverage_tracker/physician_detail.html', context)
 
 
+@admin_required
 def add_physician(request):
     if request.method == 'POST':
         form = PhysicianForm(request.POST)
@@ -199,6 +251,7 @@ def add_physician(request):
     })
 
 
+@admin_required
 def edit_physician(request, pk):
     physician = get_object_or_404(Physician, pk=pk)
     if request.method == 'POST':
@@ -214,14 +267,29 @@ def edit_physician(request, pk):
     })
 
 
+@login_required_custom
 def time_off_list(request):
+    is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
     status = request.GET.get('status', '')
     physician_id = request.GET.get('physician', '')
     qs = TimeOffRequest.objects.select_related('physician').order_by('-start_date')
-    if status:
-        qs = qs.filter(status=status)
-    if physician_id:
-        qs = qs.filter(physician_id=physician_id)
+
+    # Physicians only see their own records
+    if not is_admin:
+        try:
+            linked_physician = request.user.profile.physician
+            if linked_physician:
+                qs = qs.filter(physician=linked_physician)
+            else:
+                qs = qs.none()
+        except Exception:
+            qs = qs.none()
+    else:
+        if status:
+            qs = qs.filter(status=status)
+        if physician_id:
+            qs = qs.filter(physician_id=physician_id)
+
     physicians = Physician.objects.filter(is_active=True, physician_type='regular')
 
     # Attach coverage info to each approved request
@@ -258,20 +326,46 @@ def time_off_list(request):
         'physicians': physicians,
         'status_filter': status,
         'physician_filter': physician_id,
+        'is_admin': is_admin,
     })
 
 
+@login_required_custom
 def add_time_off(request):
+    is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
+
     if request.method == 'POST':
         form = TimeOffRequestForm(request.POST)
         if form.is_valid():
-            form.save()
+            req = form.save(commit=False)
+            # Physicians can only submit for themselves, status always pending
+            if not is_admin:
+                try:
+                    req.physician = request.user.profile.physician
+                except Exception:
+                    messages.error(request, 'No physician record linked to your account.')
+                    return redirect('time_off_list')
+                req.status = 'pending'
+            req.save()
             messages.success(request, 'Time off request submitted.')
             return redirect('time_off_list')
     else:
         physician_id = request.GET.get('physician')
-        initial = {'physician': physician_id} if physician_id else {}
+        initial = {}
+        if physician_id and is_admin:
+            initial = {'physician': physician_id}
+        elif not is_admin:
+            try:
+                initial = {'physician': request.user.profile.physician}
+            except Exception:
+                pass
         form = TimeOffRequestForm(initial=initial)
+
+    # Restrict physician field for non-admins
+    if not is_admin:
+        form.fields['physician'].widget.attrs['disabled'] = True
+        form.fields['status'].widget = form.fields['status'].hidden_widget()
+
     return render(request, 'coverage_tracker/form_page.html', {
         'form': form, 'title': 'Request Time Off', 'back_url': 'time_off_list'
     })
@@ -289,6 +383,7 @@ def _remove_coverage_for_request(req):
     return count
 
 
+@login_required_custom
 def edit_time_off(request, pk):
     req = get_object_or_404(TimeOffRequest, pk=pk)
     old_status = req.status
@@ -316,6 +411,7 @@ def edit_time_off(request, pk):
     })
 
 
+@login_required_custom
 def cancel_time_off(request, pk):
     """One-click cancellation: removes coverage assignments and sets status to cancelled."""
     req = get_object_or_404(TimeOffRequest, pk=pk)
@@ -339,6 +435,7 @@ def cancel_time_off(request, pk):
     return redirect('time_off_list')
 
 
+@admin_required
 def approve_time_off(request, pk):
     req = get_object_or_404(TimeOffRequest, pk=pk)
     req.status = 'approved'
@@ -347,6 +444,7 @@ def approve_time_off(request, pk):
     return redirect('time_off_list')
 
 
+@admin_required
 def deny_time_off(request, pk):
     req = get_object_or_404(TimeOffRequest, pk=pk)
     req.status = 'denied'
@@ -355,6 +453,7 @@ def deny_time_off(request, pk):
     return redirect('time_off_list')
 
 
+@admin_required
 def clinic_list(request):
     selected_date = request.GET.get('date', str(date.today()))
     try:
@@ -392,6 +491,7 @@ def clinic_list(request):
     })
 
 
+@admin_required
 def add_clinic(request):
     if request.method == 'POST':
         form = ClinicForm(request.POST)
@@ -406,6 +506,7 @@ def add_clinic(request):
     })
 
 
+@admin_required
 def edit_clinic(request, pk):
     clinic = get_object_or_404(Clinic, pk=pk)
     if request.method == 'POST':
@@ -421,6 +522,7 @@ def edit_clinic(request, pk):
     })
 
 
+@admin_required
 def add_coverage(request):
     if request.method == 'POST':
         form = CoverageAssignmentForm(request.POST)
@@ -436,6 +538,7 @@ def add_coverage(request):
     })
 
 
+@admin_required
 def delete_coverage(request, pk):
     assignment = get_object_or_404(CoverageAssignment, pk=pk)
     date_str = str(assignment.date)
@@ -444,6 +547,7 @@ def delete_coverage(request, pk):
     return redirect(f'/clinics/?date={date_str}')
 
 
+@admin_required
 def locum_costs(request):
     year = int(request.GET.get('year', date.today().year))
     month = request.GET.get('month', '')
@@ -514,6 +618,7 @@ def locum_costs(request):
     return render(request, 'coverage_tracker/locum_costs.html', context)
 
 
+@login_required_custom
 def availability_view(request):
     selected_date = request.GET.get('date', str(date.today()))
     try:
@@ -522,9 +627,17 @@ def availability_view(request):
         view_date = date.today()
 
     week_start = view_date - timedelta(days=view_date.weekday())
-    calendar_days = [week_start + timedelta(days=i) for i in range(14)]
+    all_days = [week_start + timedelta(days=i) for i in range(21)]
 
-    locums = Physician.objects.filter(is_active=True, physician_type='locum')
+    holidays = set(get_holidays(week_start.year))
+    if all_days[-1].year != week_start.year:
+        holidays |= set(get_holidays(all_days[-1].year))
+
+    calendar_days = [d for d in all_days if d.weekday() < 5 and d not in holidays]
+
+
+    # All active physicians (not just locums)
+    all_physicians = Physician.objects.filter(is_active=True).order_by('physician_type', 'last_name', 'first_name')
 
     time_off = TimeOffRequest.objects.filter(
         status='approved',
@@ -539,21 +652,29 @@ def availability_view(request):
             off_set.add((req.physician_id, d))
             d += timedelta(days=1)
 
-    # Also mark days locums are already assigned
     assigned_set = set()
     for a in CoverageAssignment.objects.filter(
         date__gte=calendar_days[0], date__lte=calendar_days[-1]
     ):
         assigned_set.add((a.covering_physician_id, a.date))
 
+    # Load manual availability overrides for all physicians
+    avail_map = {}
+    for av in PhysicianAvailability.objects.filter(
+        date__gte=calendar_days[0], date__lte=calendar_days[-1]
+    ):
+        avail_map[(av.physician_id, av.date)] = 'available' if av.is_available else 'unavailable'
+
     grid = []
-    for p in locums:
+    for p in all_physicians:
         row = []
         for d in calendar_days:
             if (p.id, d) in assigned_set:
                 row.append('assigned')
             elif (p.id, d) in off_set:
-                row.append('off')
+                row.append('unavailable')
+            elif (p.id, d) in avail_map:
+                row.append(avail_map[(p.id, d)])
             else:
                 row.append('available')
         grid.append({'physician': p, 'days': row})
@@ -566,6 +687,42 @@ def availability_view(request):
     })
 
 
+@login_required_custom
+def update_availability(request):
+    """AJAX endpoint: set a physician's availability for a specific date."""
+    import json
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            physician_id = data.get('physician_id')
+            date_str = data.get('date')
+            status = data.get('status')  # 'available', 'assigned', 'unavailable'
+
+            physician = Physician.objects.get(pk=physician_id, is_active=True)
+            target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+
+            if status == 'assigned':
+                # Cannot assign via this endpoint; return error
+                from django.http import JsonResponse
+                return JsonResponse({'error': 'Use the coverage assignment form to assign coverage.'}, status=400)
+
+            if status in ('available', 'unavailable'):
+                is_available = (status == 'available')
+                PhysicianAvailability.objects.update_or_create(
+                    physician=physician,
+                    date=target_date,
+                    defaults={'is_available': is_available}
+                )
+            from django.http import JsonResponse
+            return JsonResponse({'ok': True, 'status': status})
+        except Exception as e:
+            from django.http import JsonResponse
+            return JsonResponse({'error': str(e)}, status=400)
+    from django.http import JsonResponse
+    return JsonResponse({'error': 'POST required'}, status=405)
+
+
+@admin_required
 def approved_time_off_coverage(request):
     """
     Shows all approved time-off requests with per-day locum coverage.
@@ -636,13 +793,15 @@ def _build_day_locum_data(all_locums, day):
         conflict = CoverageAssignment.objects.filter(
             covering_physician=locum, date=day
         ).exclude(covered_physician=None).exists()
-        result.append({
-            'physician': locum,
-            'has_conflict': conflict,
+        if not conflict:
+            result.append({
+                'physician': locum,
+                'has_conflict': conflict,
         })
     return result
 
 
+@admin_required
 def assign_locum_to_time_off(request, pk):
     """
     Per-day locum assignment for a time-off request.
@@ -749,6 +908,7 @@ def assign_locum_to_time_off(request, pk):
     })
 
 
+@admin_required
 def edit_coverage_for_time_off(request, pk):
     """
     Edit existing per-day coverage for an approved time-off request.
@@ -758,6 +918,7 @@ def edit_coverage_for_time_off(request, pk):
     return redirect('assign_locum_to_time_off', pk=pk)
 
 
+@admin_required
 def delete_time_off_coverage_day(request, assignment_pk):
     """Delete a single day's coverage assignment, redirect back to coverage page."""
     assignment = get_object_or_404(CoverageAssignment, pk=assignment_pk)
@@ -770,6 +931,7 @@ def delete_time_off_coverage_day(request, assignment_pk):
     return redirect('approved_time_off_coverage')
 
 
+@admin_required
 def mark_availability(request):
     if request.method == 'POST':
         form = PhysicianAvailabilityForm(request.POST)
@@ -788,4 +950,268 @@ def mark_availability(request):
         form = PhysicianAvailabilityForm()
     return render(request, 'coverage_tracker/form_page.html', {
         'form': form, 'title': 'Mark Locum Availability', 'back_url': 'availability'
+    })
+
+
+@login_required_custom
+def psa_coverage_request_view(request):
+    year = int(request.GET.get('year', date.today().year))
+    physicians = Physician.objects.filter(is_active=True, physician_type='psa')
+    data = []
+    for p in physicians:
+        reqs = CoverageRequest.objects.filter(physician=p, requested_date__year=year).order_by('requested_date')
+        data.append({'physician': p, 'requests': reqs, 'total': reqs.count()})
+    return render(request, 'coverage_tracker/psa_coverage_requests.html', {
+        'data': data,
+        'year': year,
+    })
+
+
+@login_required_custom
+def add_coverage_request(request):
+    from django import forms as dj_forms
+
+    class CoverageRequestForm(dj_forms.Form):
+        physician = dj_forms.ModelChoiceField(
+            queryset=Physician.objects.filter(is_active=True, physician_type='psa'),
+            label='PSA Physician'
+        )
+        requested_date = dj_forms.DateField(widget=dj_forms.DateInput(attrs={'type': 'date'}))
+        status = dj_forms.ChoiceField(choices=CoverageRequest.STATUS_CHOICES, initial='pending')
+        notes = dj_forms.CharField(required=False, widget=dj_forms.Textarea(attrs={'rows': 2}))
+
+    if request.method == 'POST':
+        form = CoverageRequestForm(request.POST)
+        if form.is_valid():
+            CoverageRequest.objects.update_or_create(
+                physician=form.cleaned_data['physician'],
+                requested_date=form.cleaned_data['requested_date'],
+                defaults={
+                    'status': form.cleaned_data['status'],
+                    'notes': form.cleaned_data.get('notes', ''),
+                }
+            )
+            messages.success(request, 'Coverage request recorded.')
+            return redirect('psa_coverage_request')
+    else:
+        form = CoverageRequestForm()
+    return render(request, 'coverage_tracker/form_page.html', {
+        'form': form,
+        'title': 'Add PSA Coverage Request',
+        'back_url': 'psa_coverage_request',
+    })
+
+
+@login_required_custom
+def delete_coverage_request(request, pk):
+    req = get_object_or_404(CoverageRequest, pk=pk)
+    req.delete()
+    messages.success(request, 'Coverage request deleted.')
+    return redirect('psa_coverage_request')
+
+
+# ─── Auth Views ──────────────────────────────────────────────────────────────
+
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    form = AuthenticationForm(request, data=request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        user = form.get_user()
+        login(request, user)
+        # Ensure profile exists
+        UserProfile.objects.get_or_create(user=user)
+        next_url = request.GET.get('next') or request.POST.get('next') or '/'
+        return redirect(next_url)
+    return render(request, 'coverage_tracker/login.html', {'form': form, 'next': request.GET.get('next', '')})
+
+
+def logout_view(request):
+    logout(request)
+    return redirect('/login/')
+
+
+# ─── User Management (Admin only) ────────────────────────────────────────────
+
+@admin_required
+def user_management(request):
+    from django.contrib.auth.models import User as DjangoUser
+    users = DjangoUser.objects.select_related('profile').order_by('last_name', 'first_name')
+    # Ensure profile exists for all users
+    for u in users:
+        UserProfile.objects.get_or_create(user=u)
+    users = DjangoUser.objects.select_related('profile__physician').order_by('last_name', 'first_name')
+    return render(request, 'coverage_tracker/user_management.html', {'users': users})
+
+
+@admin_required
+def add_user(request):
+    from django.contrib.auth.models import User as DjangoUser
+    from django import forms as dj_forms
+
+    class AddUserForm(dj_forms.Form):
+        first_name   = dj_forms.CharField(max_length=100, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
+        last_name    = dj_forms.CharField(max_length=100, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
+        username     = dj_forms.CharField(max_length=150, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
+        email        = dj_forms.EmailField(required=False, widget=dj_forms.EmailInput(attrs={'class': 'form-control'}))
+        password     = dj_forms.CharField(widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}), min_length=6)
+        role         = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('admin', 'Administrator')],
+                                             widget=dj_forms.Select(attrs={'class': 'form-control'}))
+        physician    = dj_forms.ModelChoiceField(
+            queryset=Physician.objects.filter(is_active=True).exclude(userprofile__isnull=False),
+            required=False,
+            empty_label='— Not linked to a physician record —',
+            widget=dj_forms.Select(attrs={'class': 'form-control'}),
+            help_text='Link this account to a physician record so they can submit time-off requests.'
+        )
+
+    if request.method == 'POST':
+        form = AddUserForm(request.POST)
+        if form.is_valid():
+            cd = form.cleaned_data
+            if DjangoUser.objects.filter(username=cd['username']).exists():
+                form.add_error('username', 'Username already taken.')
+            else:
+                user = DjangoUser.objects.create_user(
+                    username=cd['username'],
+                    email=cd.get('email', ''),
+                    password=cd['password'],
+                    first_name=cd['first_name'],
+                    last_name=cd['last_name'],
+                )
+                UserProfile.objects.create(
+                    user=user,
+                    role=cd['role'],
+                    physician=cd.get('physician'),
+                )
+                messages.success(request, f"Account created for {user.get_full_name() or user.username}.")
+                return redirect('user_management')
+    else:
+        form = AddUserForm()
+
+    return render(request, 'coverage_tracker/form_page.html', {
+        'form': form,
+        'title': 'Add User Account',
+        'back_url': 'user_management',
+    })
+
+
+@admin_required
+def edit_user(request, pk):
+    from django.contrib.auth.models import User as DjangoUser
+    from django import forms as dj_forms
+
+    user = get_object_or_404(DjangoUser, pk=pk)
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    class EditUserForm(dj_forms.Form):
+        first_name  = dj_forms.CharField(max_length=100, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
+        last_name   = dj_forms.CharField(max_length=100, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
+        email       = dj_forms.EmailField(required=False, widget=dj_forms.EmailInput(attrs={'class': 'form-control'}))
+        role        = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('admin', 'Administrator')],
+                                            widget=dj_forms.Select(attrs={'class': 'form-control'}))
+        physician   = dj_forms.ModelChoiceField(
+            queryset=Physician.objects.filter(is_active=True),
+            required=False,
+            empty_label='— Not linked to a physician record —',
+            widget=dj_forms.Select(attrs={'class': 'form-control'}),
+        )
+        new_password = dj_forms.CharField(
+            required=False, min_length=6,
+            widget=dj_forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Leave blank to keep current'}),
+            help_text='Only fill this in to change the password.'
+        )
+        is_active   = dj_forms.BooleanField(required=False, initial=True)
+
+    if request.method == 'POST':
+        form = EditUserForm(request.POST)
+        if form.is_valid():
+            cd = form.cleaned_data
+            user.first_name = cd['first_name']
+            user.last_name  = cd['last_name']
+            user.email      = cd.get('email', '')
+            user.is_active  = cd.get('is_active', True)
+            if cd.get('new_password'):
+                user.set_password(cd['new_password'])
+            user.save()
+            profile.role      = cd['role']
+            profile.physician = cd.get('physician')
+            profile.save()
+            messages.success(request, f"Account updated for {user.get_full_name() or user.username}.")
+            return redirect('user_management')
+    else:
+        form = EditUserForm(initial={
+            'first_name': user.first_name,
+            'last_name':  user.last_name,
+            'email':      user.email,
+            'role':       profile.role,
+            'physician':  profile.physician,
+            'is_active':  user.is_active,
+        })
+
+    return render(request, 'coverage_tracker/form_page.html', {
+        'form': form,
+        'title': f'Edit Account — {user.get_full_name() or user.username}',
+        'back_url': 'user_management',
+    })
+
+
+@admin_required
+def delete_user(request, pk):
+    from django.contrib.auth.models import User as DjangoUser
+    user = get_object_or_404(DjangoUser, pk=pk)
+    if user == request.user:
+        messages.error(request, "You cannot delete your own account.")
+        return redirect('user_management')
+    name = user.get_full_name() or user.username
+    user.delete()
+    messages.success(request, f"Account for {name} deleted.")
+    return redirect('user_management')
+
+
+# ─── Change Password (all logged-in users) ───────────────────────────────────
+
+@login_required_custom
+def change_password(request):
+    from django import forms as dj_forms
+    from django.contrib.auth import update_session_auth_hash
+
+    class ChangePasswordForm(dj_forms.Form):
+        current_password = dj_forms.CharField(
+            widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}),
+            label='Current Password'
+        )
+        new_password = dj_forms.CharField(
+            widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}),
+            label='New Password', min_length=6
+        )
+        confirm_password = dj_forms.CharField(
+            widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}),
+            label='Confirm New Password'
+        )
+
+        def clean(self):
+            cleaned = super().clean()
+            if cleaned.get('new_password') != cleaned.get('confirm_password'):
+                raise dj_forms.ValidationError('New passwords do not match.')
+            return cleaned
+
+    if request.method == 'POST':
+        form = ChangePasswordForm(request.POST)
+        if form.is_valid():
+            if not request.user.check_password(form.cleaned_data['current_password']):
+                form.add_error('current_password', 'Current password is incorrect.')
+            else:
+                request.user.set_password(form.cleaned_data['new_password'])
+                request.user.save()
+                update_session_auth_hash(request, request.user)
+                messages.success(request, 'Password updated successfully.')
+                return redirect('dashboard')
+    else:
+        form = ChangePasswordForm()
+
+    return render(request, 'coverage_tracker/form_page.html', {
+        'form': form,
+        'title': 'Change Password',
+        'back_url': 'dashboard',
     })

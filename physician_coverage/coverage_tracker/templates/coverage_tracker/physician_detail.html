@@ -29,7 +29,7 @@
   </div>
 </div>
 
-{% if physician.is_regular %}
+{% if physician.is_regular or physician.is_psa %}
 <!-- Regular physician stats -->
 <div class="stats-grid">
   <div class="stat-card"><div class="stat-label">Annual Allocation</div><div class="stat-value">{{ physician.total_vacation_days }}</div><div class="stat-sub">days / year</div></div>
@@ -59,7 +59,7 @@
 {% endif %}
 
 <div class="two-col">
-  {% if physician.is_regular %}
+  {% if physician.is_regular or physician.is_psa %}
   <!-- Time off requests -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">

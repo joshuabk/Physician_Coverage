@@ -49,6 +49,7 @@ class Physician(models.Model):
     PHYSICIAN_TYPE_CHOICES = [
         ('regular', 'Regular Physician'),
         ('locum', 'Locum / Covering Physician'),
+        ('psa', 'PSA Physician'),
     ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)
@@ -85,6 +86,10 @@ class Physician(models.Model):
     def is_regular(self):
         return self.physician_type == 'regular'
 
+    @property
+    def is_psa(self):
+        return self.physician_type == 'psa'
+
     def days_taken(self, year=None):
         if year is None:
             year = timezone.now().year
@@ -115,6 +120,11 @@ class Physician(models.Model):
         assignments = CoverageAssignment.objects.filter(covering_physician=self, date__year=year)
         return sum(a.cost for a in assignments)
 
+    def requested_coverage_days(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        return CoverageRequest.objects.filter(physician=self, requested_date__year=year).count()
+
 
 class Clinic(models.Model):
     name = models.CharField(max_length=200)
@@ -124,8 +134,8 @@ class Clinic(models.Model):
         'Physician',
         blank=True,
         related_name='assigned_clinics',
-        limit_choices_to={'physician_type': 'regular'},
-        help_text="Regular physicians permanently assigned to this clinic"
+        limit_choices_to={'physician_type__in': ['regular', 'psa']},
+        help_text= "Regular and PSA physicians permanently assigned to this clinic"
     )
     is_active = models.BooleanField(default=True)
 
@@ -234,3 +244,51 @@ class PhysicianAvailability(models.Model):
     def __str__(self):
         status = "Available" if self.is_available else "Unavailable"
         return f"{self.physician} — {self.date} ({status})"
+
+
+class CoverageRequest(models.Model):
+    """Tracks requested coverage days for PSA physicians."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+    ]
+    physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='coverage_requests'
+    )
+    requested_date = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-requested_date']
+        unique_together = ['physician', 'requested_date']
+
+    def __str__(self):
+        return f"{self.physician} — {self.requested_date} ({self.status})"
+
+
+class UserProfile(models.Model):
+    """Extends Django User with role: admin or physician."""
+    ROLE_CHOICES = [
+        ('admin', 'Administrator'),
+        ('physician', 'Physician'),
+    ]
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='physician')
+    physician = models.OneToOneField(
+        Physician, on_delete=models.SET_NULL, null=True, blank=True,
+        help_text="Link this login to a physician record"
+    )
+
+    @property
+    def is_admin(self):
+        return self.role == 'admin' or self.user.is_superuser
+
+    @property
+    def is_physician(self):
+        return self.role == 'physician'
+
+    def __str__(self):
+        return f"{self.user.username} ({self.get_role_display()})"

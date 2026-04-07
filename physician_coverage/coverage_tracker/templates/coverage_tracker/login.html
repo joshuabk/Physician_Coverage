@@ -1,0 +1,49 @@
+{% extends "coverage_tracker/base_public.html" %}
+{% block title %}Sign In — PhysicianCoverage{% endblock %}
+{% block content %}
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;">
+  <div style="width:100%;max-width:400px;">
+    <div style="text-align:center;margin-bottom:2rem;">
+      <div style="display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;background:rgba(0,184,169,0.15);border-radius:14px;margin-bottom:1rem;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <h1 style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:-0.3px;">PhysicianCoverage</h1>
+      <p class="text-muted text-sm" style="margin-top:4px;">Sign in to your account</p>
+    </div>
+
+    <div class="card" style="padding:2rem;">
+      {% if form.errors %}
+      <div style="background:rgba(224,84,84,0.12);border:1px solid rgba(224,84,84,0.3);border-radius:8px;padding:10px 14px;margin-bottom:1.25rem;font-size:13px;color:var(--red);">
+        Invalid username or password. Please try again.
+      </div>
+      {% endif %}
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div class="form-group">
+          <label for="id_username">Username</label>
+          <input type="text" name="username" id="id_username" class="form-control" autofocus autocomplete="username" placeholder="Enter your username">
+        </div>
+
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label for="id_password">Password</label>
+          <input type="password" name="password" id="id_password" class="form-control" autocomplete="current-password" placeholder="Enter your password">
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:10px;">
+          Sign In
+        </button>
+      </form>
+    </div>
+
+    <p style="text-align:center;font-size:12px;color:var(--text-3);margin-top:1.5rem;">
+      Contact your administrator to reset your password.
+    </p>
+  </div>
+</div>
+{% endblock %}

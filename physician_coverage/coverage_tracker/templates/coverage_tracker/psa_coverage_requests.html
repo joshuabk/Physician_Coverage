@@ -1,0 +1,96 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}PSA Coverage Requests{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>PSA Physicians — Requested Coverage Days</h1>
+    <p class="text-muted text-sm mt-1">Track the number of coverage days requested by PSA physicians in {{ year }}</p>
+  </div>
+  <div class="flex gap-2">
+    <form method="get" style="display:flex;gap:8px;align-items:center;">
+      <input type="number" name="year" value="{{ year }}" min="2020" max="2035"
+        style="width:76px;background:var(--card);border:1px solid var(--border-2);border-radius:7px;color:var(--text);padding:5px 9px;font-size:13px;outline:none;">
+      <button type="submit" class="btn btn-ghost btn-sm">Go</button>
+    </form>
+    <a href="/physicians/psa/coverage-requests/add/" class="btn btn-primary">+ Add Request</a>
+  </div>
+</div>
+
+<div class="type-tabs">
+  <a href="/physicians/?type=regular&year={{ year }}" class="type-tab">Regular Physicians</a>
+  <a href="/physicians/?type=locum" class="type-tab">Locum Physicians</a>
+  <a href="/physicians/?type=psa&year={{ year }}" class="type-tab">PSA Physicians</a>
+  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="type-tab active">Track # of Requested Coverage Days</a>
+</div>
+
+{% if data %}
+{% for row in data %}
+<div class="card" style="margin-bottom:1.25rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid var(--border);">
+    <div class="flex items-center gap-3">
+      <div class="avatar avatar-locum" style="background:rgba(155,89,182,0.25);color:#c39bd3;">
+        {{ row.physician.first_name.0 }}{{ row.physician.last_name.0 }}
+      </div>
+      <div>
+        <a href="/physicians/{{ row.physician.pk }}/" style="font-weight:600;color:var(--text);text-decoration:none;">
+          Dr. {{ row.physician.first_name }} {{ row.physician.last_name }}
+        </a>
+        <div class="text-muted text-sm">{{ row.physician.email }}</div>
+      </div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:var(--teal);">{{ row.total }}</div>
+      <div class="text-muted text-sm">requested day{{ row.total|pluralize }} in {{ year }}</div>
+    </div>
+  </div>
+
+  {% if row.requests %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Requested Date</th>
+          <th>Status</th>
+          <th>Notes</th>
+          <th>Added</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in row.requests %}
+        <tr>
+          <td style="font-family:'DM Mono',monospace;font-weight:500;">{{ req.requested_date|date:"M j, Y" }}</td>
+          <td>
+            {% if req.status == 'approved' %}
+              <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);">Approved</span>
+            {% elif req.status == 'denied' %}
+              <span class="badge" style="background:rgba(224,84,84,0.15);color:var(--red);">Denied</span>
+            {% else %}
+              <span class="badge badge-pending">Pending</span>
+            {% endif %}
+          </td>
+          <td class="text-muted">{{ req.notes|default:"—" }}</td>
+          <td class="text-muted text-sm">{{ req.created_at|date:"M j" }}</td>
+          <td>
+            <a href="/physicians/psa/coverage-requests/{{ req.pk }}/delete/"
+               onclick="return confirm('Delete this coverage request?')"
+               class="btn btn-ghost btn-sm" style="color:var(--red);">Delete</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state" style="padding:1rem;">No coverage requests recorded for {{ year }}.</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+  <div class="empty-state" style="padding:2rem;text-align:center;">
+    No PSA physicians found. <a href="/physicians/add/?type=psa" style="color:var(--teal);">Add one</a>.
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,16 +1,18 @@
 {% extends "coverage_tracker/base.html" %}
 {% block title %}Time Off Requests{% endblock %}
-
 {% block content %}
 <div class="page-header">
   <h1>Time Off Requests</h1>
   <div style="display:flex; gap:8px;">
+    {% if is_admin %}
     <a href="/time-off/approved-coverage/" class="btn btn-ghost">Coverage View</a>
+    {% endif %}
     <a href="/time-off/add/" class="btn btn-primary">+ New Request</a>
   </div>
 </div>
 
-<!-- Filters -->
+{% if is_admin %}
+<!-- Filters: admin only -->
 <form method="get" style="display:flex; gap:10px; margin-bottom:1.25rem; flex-wrap:wrap;">
   <select name="status" class="form-control" style="width:auto;">
     <option value="">All Statuses</option>
@@ -28,18 +30,19 @@
   <button type="submit" class="btn btn-ghost">Filter</button>
   <a href="/time-off/" class="btn btn-ghost">Clear</a>
 </form>
+{% endif %}
 
 <div class="card">
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Physician</th>
+          {% if is_admin %}<th>Physician</th>{% endif %}
           <th>Dates</th>
           <th>Days</th>
           <th>Type</th>
           <th>Status</th>
-          <th>Coverage</th>
+          {% if is_admin %}<th>Coverage</th>{% endif %}
           <th>Actions</th>
         </tr>
       </thead>
@@ -47,15 +50,18 @@
         {% for item in enriched_requests %}
         {% with req=item.req %}
         <tr>
+          {% if is_admin %}
           <td>
             <a href="/physicians/{{ req.physician.pk }}/" style="color:var(--text); text-decoration:none; font-weight:500;">
               {{ req.physician }}
             </a>
           </td>
+          {% endif %}
           <td class="text-muted">{{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}</td>
           <td style="font-family:'DM Mono',monospace;">{{ req.duration_days }}</td>
           <td class="text-muted">{{ req.get_request_type_display }}</td>
           <td><span class="badge badge-{{ req.status }}">{{ req.get_status_display }}</span></td>
+          {% if is_admin %}
           <td>
             {% if req.status == 'approved' %}
               {% if item.coverage_status == 'full' %}
@@ -79,33 +85,47 @@
                   <span style="font-size:11px; color:var(--amber); margin-top:1px;">⚠ Partial coverage</span>
                 </div>
               {% else %}
-                <a href="/time-off/{{ req.pk }}/assign-locum/" style="font-size:12px; color:var(--amber); text-decoration:none; display:flex; align-items:center; gap:4px;">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                  Assign locum
+                <a href="/time-off/{{ req.pk }}/assign-locum/" style="font-size:12px; color:var(--amber); text-decoration:none;">
+                  + Assign locum
                 </a>
               {% endif %}
             {% else %}
               <span class="text-muted text-sm">—</span>
             {% endif %}
           </td>
+          {% endif %}
           <td>
             <div class="flex gap-2">
-              <a href="/time-off/{{ req.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
-              {% if req.status == 'pending' %}
-                <a href="/time-off/{{ req.pk }}/approve/" class="btn btn-success btn-sm">Approve</a>
-                <a href="/time-off/{{ req.pk }}/deny/" class="btn btn-danger btn-sm">Deny</a>
-              {% endif %}
-              {% if req.status == 'approved' %}
-                <a href="/time-off/{{ req.pk }}/assign-locum/" class="btn btn-ghost btn-sm" title="Edit coverage">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </a>
-              {% endif %}
-              {% if req.status == 'pending' or req.status == 'approved' %}
-                <a href="/time-off/{{ req.pk }}/cancel/"
-                   class="btn btn-danger btn-sm"
-                   onclick="return confirm('Cancel this time off request? Any assigned locum coverage will also be removed.')">
-                  Cancel
-                </a>
+              {% if is_admin %}
+                <a href="/time-off/{{ req.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
+                {% if req.status == 'pending' %}
+                  <a href="/time-off/{{ req.pk }}/approve/" class="btn btn-success btn-sm">Approve</a>
+                  <a href="/time-off/{{ req.pk }}/deny/" class="btn btn-danger btn-sm">Deny</a>
+                {% endif %}
+                {% if req.status == 'approved' %}
+                  <a href="/time-off/{{ req.pk }}/assign-locum/" class="btn btn-ghost btn-sm" title="Edit coverage">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </a>
+                {% endif %}
+                {% if req.status == 'pending' or req.status == 'approved' %}
+                  <a href="/time-off/{{ req.pk }}/cancel/"
+                     class="btn btn-danger btn-sm"
+                     onclick="return confirm('Cancel this time off request?')">Cancel</a>
+                {% endif %}
+              {% else %}
+                {# Physician: can only cancel their own pending requests #}
+                {% if req.status == 'pending' %}
+                  <span class="badge badge-pending" style="margin-right:4px;">Awaiting approval</span>
+                  <a href="/time-off/{{ req.pk }}/cancel/"
+                     class="btn btn-danger btn-sm"
+                     onclick="return confirm('Cancel this request?')">Cancel</a>
+                {% elif req.status == 'approved' %}
+                  <span style="font-size:12px;color:var(--green);">✓ Approved</span>
+                {% elif req.status == 'denied' %}
+                  <span style="font-size:12px;color:var(--red);">Denied</span>
+                {% else %}
+                  <span class="text-muted text-sm">{{ req.get_status_display }}</span>
+                {% endif %}
               {% endif %}
             </div>
           </td>
@@ -114,7 +134,7 @@
         {% empty %}
         <tr>
           <td colspan="7" style="text-align:center; padding:2rem;" class="empty-state">
-            No requests found.
+            {% if is_admin %}No requests found.{% else %}You have no time off requests yet. <a href="/time-off/add/" style="color:var(--teal);">Submit one</a>.{% endif %}
           </td>
         </tr>
         {% endfor %}

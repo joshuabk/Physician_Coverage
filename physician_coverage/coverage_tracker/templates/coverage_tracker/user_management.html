@@ -1,0 +1,127 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}User Accounts{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>User Accounts</h1>
+    <p class="text-muted text-sm mt-1">Manage physician and administrator logins</p>
+  </div>
+  <a href="/users/add/" class="btn btn-primary">+ Add User</a>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Linked Physician</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>
+            <div class="flex items-center gap-3">
+              <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;
+                {% if user.profile.is_admin %}background:rgba(245,166,35,0.2);color:var(--amber);
+                {% else %}background:rgba(0,184,169,0.15);color:var(--teal);{% endif %}">
+                {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
+              </div>
+              <div>
+                <div style="font-weight:500;color:var(--text);">{{ user.get_full_name|default:user.username }}</div>
+                <div class="text-muted text-sm">{{ user.email|default:"—" }}</div>
+              </div>
+            </div>
+          </td>
+          <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--text-2);">{{ user.username }}</td>
+          <td>
+            {% if user.profile.is_admin %}
+              <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);">
+                ⚙ Administrator
+              </span>
+            {% else %}
+              <span class="badge badge-regular">
+                👤 Physician
+              </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.profile.physician %}
+              <a href="/physicians/{{ user.profile.physician.pk }}/" style="color:var(--teal);text-decoration:none;font-size:13px;">
+                {{ user.profile.physician }}
+              </a>
+              <div class="text-muted text-sm">{{ user.profile.physician.get_physician_type_display }}</div>
+            {% else %}
+              <span class="text-muted">— not linked —</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.is_active %}
+              <span style="font-size:12px;color:var(--green);">● Active</span>
+            {% else %}
+              <span style="font-size:12px;color:var(--red);">● Inactive</span>
+            {% endif %}
+            {% if user == request.user %}
+              <span class="text-muted text-sm" style="margin-left:6px;">(you)</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="flex gap-2">
+              <a href="/users/{{ user.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
+              {% if user != request.user %}
+              <a href="/users/{{ user.pk }}/delete/"
+                 class="btn btn-danger btn-sm"
+                 onclick="return confirm('Delete account for {{ user.get_full_name|default:user.username }}? This cannot be undone.')">
+                Delete
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" style="text-align:center;padding:2rem;" class="empty-state">
+            No user accounts yet. <a href="/users/add/" style="color:var(--teal);">Add one</a>.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1.25rem;">
+  <div class="card-title">About Roles</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.5rem;">
+    <div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.2);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;color:var(--amber);margin-bottom:6px;">⚙ Administrator</div>
+      <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
+        <li>✓ View all physicians including locums</li>
+        <li>✓ See locum rates, costs, and coverage details</li>
+        <li>✓ Approve / deny time off requests</li>
+        <li>✓ Assign locum coverage</li>
+        <li>✓ Add / edit physicians and clinics</li>
+        <li>✓ Manage user accounts</li>
+        <li>✓ Full dashboard access</li>
+      </ul>
+    </div>
+    <div style="background:rgba(0,184,169,0.07);border:1px solid rgba(0,184,169,0.2);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;color:var(--teal);margin-bottom:6px;">👤 Physician</div>
+      <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
+        <li>✓ Submit time off requests for themselves</li>
+        <li>✓ View their own time off history</li>
+        <li>✓ View regular physician list</li>
+        <li>✓ View availability calendar</li>
+        <li>✗ Cannot see locum rates or costs</li>
+        <li>✗ Cannot approve requests or assign coverage</li>
+        <li>✗ Cannot add or edit physician records</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

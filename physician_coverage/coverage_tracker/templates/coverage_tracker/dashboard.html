@@ -23,16 +23,19 @@
     <div class="stat-value" style="color:var(--teal);">{{ regular_physicians.count }}</div>
     <div class="stat-sub">active staff</div>
   </div>
+  {% if is_admin %}
   <div class="stat-card">
     <div class="stat-label">Locum Pool</div>
     <div class="stat-value" style="color:var(--purple);">{{ locum_physicians.count }}</div>
     <div class="stat-sub">covering physicians</div>
   </div>
+  {% endif %}
   <div class="stat-card">
     <div class="stat-label">Out Today</div>
     <div class="stat-value" style="color:var(--red);">{{ out_today.count }}</div>
     <div class="stat-sub">on approved leave</div>
   </div>
+  {% if is_admin %}
   <div class="stat-card">
     <div class="stat-label">{{ year }} Locum Days</div>
     <div class="stat-value" style="color:var(--amber);">{{ total_locum_days }}</div>
@@ -43,11 +46,14 @@
     <div class="stat-value" style="color:var(--amber); font-size:20px;">${{ total_locum_cost|floatformat:0 }}</div>
     <div class="stat-sub">total spend</div>
   </div>
+  {% endif %}
+  {% if is_admin %}
   <div class="stat-card">
     <div class="stat-label">Pending Requests</div>
     <div class="stat-value" style="color:var(--amber);">{{ pending.count }}</div>
     <div class="stat-sub">awaiting approval</div>
   </div>
+  {% endif %}
 </div>
 
 <div class="two-col">
@@ -90,6 +96,7 @@
     </div>
   </div>
 
+  {% if is_admin %}
   <!-- Locum cost summary -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
@@ -119,6 +126,32 @@
       </table>
     </div>
   </div>
+  {% else %}
+  <!-- Physician view: show their own upcoming time off instead -->
+  <div class="card">
+    <div class="card-title">My Upcoming Time Off</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dates</th><th>Type</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for req in upcoming %}
+          <tr>
+            <td class="text-muted">{{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}</td>
+            <td class="text-muted">{{ req.get_request_type_display }}</td>
+            <td><span class="badge badge-{{ req.status }}">{{ req.get_status_display }}</span></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3" class="empty-state">No upcoming approved time off.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:0.75rem;">
+      <a href="/time-off/add/" class="btn btn-primary btn-sm">+ Request Time Off</a>
+      <a href="/time-off/" class="btn btn-ghost btn-sm" style="margin-left:6px;">View All My Requests</a>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <div class="two-col" style="margin-top:1.25rem;">
@@ -159,7 +192,8 @@
     </div>
   </div>
 
-  <!-- Pending requests -->
+  {% if is_admin %}
+  <!-- Pending requests (admin only) -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
       <span>Pending Time Off Requests</span>
@@ -188,5 +222,22 @@
       </table>
     </div>
   </div>
+  {% else %}
+  <!-- Physician: quick actions panel -->
+  <div class="card">
+    <div class="card-title">Quick Actions</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <a href="/time-off/add/" class="btn btn-primary" style="justify-content:center;">
+        + Request Time Off
+      </a>
+      <a href="/time-off/" class="btn btn-ghost" style="justify-content:center;">
+        View My Requests
+      </a>
+      <a href="/availability/" class="btn btn-ghost" style="justify-content:center;">
+        View Availability Calendar
+      </a>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
