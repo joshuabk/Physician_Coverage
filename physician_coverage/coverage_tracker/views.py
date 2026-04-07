@@ -20,6 +20,8 @@ from .decorators import login_required_custom, admin_required
 
 #admin pass:Abk-****  user: superuser
 
+#physician  pass: doctor1,  user: doc
+
 def get_holidays(year):
     holidays = []
     
