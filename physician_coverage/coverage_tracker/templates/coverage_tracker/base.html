@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Physician Coverage{% endblock %}</title>
+  <title>{% block title %}Physician Scheduler{% endblock %}</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -123,17 +123,20 @@
     PhysicianCoverage
   </a>
   <ul class="nav-links">
+    {% if request.user.is_authenticated and request.user.profile.is_admin %}
     <li><a href="/" {% if request.resolver_match.url_name == 'dashboard' %}class="active"{% endif %}>Dashboard</a></li>
-    <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
+    {% endif %}
     <li><a href="/time-off/" {% if 'time_off' in request.resolver_match.url_name and request.resolver_match.url_name != 'approved_time_off_coverage' and request.resolver_match.url_name != 'assign_locum_to_time_off' %}class="active"{% endif %}>Time Off</a></li>
     {% if request.user.is_authenticated and request.user.profile.is_admin %}
+     <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
     <li><a href="/time-off/approved-coverage/" {% if request.resolver_match.url_name == 'approved_time_off_coverage' or request.resolver_match.url_name == 'assign_locum_to_time_off' %}class="active"{% endif %}>Coverage</a></li>
     <li><a href="/clinics/" {% if 'clinic' in request.resolver_match.url_name %}class="active"{% endif %}>Clinics</a></li>
     <li><a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a></li>
     <li><a href="/users/" {% if 'user' in request.resolver_match.url_name %}class="active"{% endif %}>Users</a></li>
+     <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
     {% endif %}
-    <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
   </ul>
+   
   <div class="nav-spacer"></div>
   {% if request.user.is_authenticated %}
     <div style="display:flex;align-items:center;gap:10px;">

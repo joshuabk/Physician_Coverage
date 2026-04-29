@@ -63,7 +63,7 @@
                 <div>
                   <div class="locum-tag">{{ a.covering_physician }}</div>
                   {% if a.covered_physician %}<div class="text-muted text-sm" style="margin-top:2px;">covering {{ a.covered_physician }}</div>{% endif %}
-                  <div class="text-muted text-sm" style="margin-top:2px;">Rate: ${{ a.effective_daily_rate }}/day</div>
+                  
                 </div>
                 <a href="/coverage/{{ a.pk }}/delete/" class="btn btn-danger btn-sm" onclick="return confirm('Remove this assignment?')">✕</a>
               </div>
@@ -107,10 +107,7 @@
         <div class="avatar avatar-locum">{{ p.first_name.0 }}{{ p.last_name.0 }}</div>
         <div style="flex:1;">
           <div style="font-weight:500;font-size:13.5px;">{{ p }}</div>
-          <div class="text-muted text-sm">
-            
-            {% if p.daily_rate %} · ${{ p.daily_rate }}/day{% endif %}
-          </div>
+          
         </div>
         <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" class="btn btn-ghost btn-sm">Assign</a>
       </div>

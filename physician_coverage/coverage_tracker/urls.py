@@ -11,6 +11,7 @@ urlpatterns = [
     path('physicians/add/', views.add_physician, name='add_physician'),
     path('physicians/<int:pk>/', views.physician_detail, name='physician_detail'),
     path('physicians/<int:pk>/edit/', views.edit_physician, name='edit_physician'),
+    path('physicians/<int:pk>/delete/', views.delete_physician, name='delete_physician'),
     path('physicians/psa/coverage-requests/', views.psa_coverage_request_view, name='psa_coverage_request'),
     path('physicians/psa/coverage-requests/add/', views.add_coverage_request, name='add_coverage_request'),
     path('physicians/psa/coverage-requests/<int:pk>/delete/', views.delete_coverage_request, name='delete_coverage_request'),

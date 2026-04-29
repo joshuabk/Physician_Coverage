@@ -6,7 +6,7 @@ class PhysicianForm(forms.ModelForm):
     class Meta:
         model = Physician
         fields = ['first_name', 'last_name', 'email',  'physician_type',
-                  'total_vacation_days', 'daily_rate', 'agency', 'is_active']
+                  'total_vacation_days', 'hourly_rate', 'agency', 'is_active']
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'form-control'}),
             'last_name': forms.TextInput(attrs={'class': 'form-control'}),
@@ -14,7 +14,11 @@ class PhysicianForm(forms.ModelForm):
             
             'physician_type': forms.Select(attrs={'class': 'form-control'}),
             'total_vacation_days': forms.NumberInput(attrs={'class': 'form-control'}),
-            'daily_rate': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'e.g. 1200.00'}),
+            'hourly_rate': forms.NumberInput(attrs={
+                'class': 'form-control', 'step': '10.00',
+                'placeholder': '340.00',
+            }),
+            
             'agency': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. CompHealth, Weatherby'}),
         }
 
@@ -42,13 +46,13 @@ class ClinicForm(forms.ModelForm):
 class TimeOffRequestForm(forms.ModelForm):
     class Meta:
         model = TimeOffRequest
-        fields = ['physician', 'start_date', 'end_date', 'request_type', 'status', 'notes']
+        fields = ['physician', 'start_date', 'end_date', 'request_type', 'notes']
         widgets = {
             'physician': forms.Select(attrs={'class': 'form-control'}),
             'start_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'end_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'request_type': forms.Select(attrs={'class': 'form-control'}),
-            'status': forms.Select(attrs={'class': 'form-control'}),
+            
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 

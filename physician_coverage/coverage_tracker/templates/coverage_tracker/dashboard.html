@@ -19,7 +19,7 @@
 
 <div class="stats-grid">
   <div class="stat-card">
-    <div class="stat-label">Regular Physicians</div>
+    <div class="stat-label">NROC Physicians</div>
     <div class="stat-value" style="color:var(--teal);">{{ regular_physicians.count }}</div>
     <div class="stat-sub">active staff</div>
   </div>
@@ -37,9 +37,9 @@
   </div>
   {% if is_admin %}
   <div class="stat-card">
-    <div class="stat-label">{{ year }} Locum Days</div>
-    <div class="stat-value" style="color:var(--amber);">{{ total_locum_days }}</div>
-    <div class="stat-sub">coverage shifts</div>
+    <div class="stat-label">{{ year }} Locum Hours</div>
+    <div class="stat-value" style="color:var(--amber);">{{ total_locum_hours }}</div>
+    <div class="stat-sub">total hours worked</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">{{ year }} Locum Cost</div>
@@ -60,7 +60,7 @@
   <!-- Vacation balances -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>{{ year }} Vacation Balances — Regular Physicians</span>
+      <span>{{ year }} Vacation Balances — NROC Physicians</span>
       <a href="/physicians/?type=regular&year={{ year }}" class="btn btn-ghost btn-sm">View all</a>
     </div>
     <div class="table-wrap">
@@ -89,7 +89,7 @@
             </td>
           </tr>
           {% empty %}
-          <tr><td colspan="4" class="empty-state">No regular physicians.</td></tr>
+          <tr><td colspan="4" class="empty-state">No NROC physicians.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -105,7 +105,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Locum</th><th>Rate/Day</th><th>Days</th><th>Cost</th></tr></thead>
+        <thead><tr><th>Locum</th><th>Rate/hr</th><th>Hours</th><th>Cost</th></tr></thead>
         <tbody>
           {% for s in locum_summaries %}
           <tr>
@@ -115,14 +115,24 @@
               </a>
               {% if s.physician.agency %}<div class="text-muted text-sm">{{ s.physician.agency }}</div>{% endif %}
             </td>
-            <td class="money text-muted">${{ s.physician.daily_rate|default:"—" }}</td>
-            <td style="font-family:'DM Mono',monospace;">{{ s.days }}</td>
+            <td class="money text-muted">{% if s.physician.hourly_rate %}${{ s.physician.hourly_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td style="font-family:'DM Mono',monospace;">{{ s.hours|floatformat:0 }}</td>
             <td style="color:var(--amber);font-family:'DM Mono',monospace;font-weight:500;">${{ s.cost|floatformat:0 }}</td>
           </tr>
           {% empty %}
           <tr><td colspan="4" class="empty-state">No locum physicians added yet.</td></tr>
           {% endfor %}
         </tbody>
+          {% if locum_summaries %}
+        <tfoot>
+          <tr style="border-top:2px solid var(--border-2); font-weight:600; padding-left:12px">
+            <td style="padding-top:10px;  padding-left:12px">Totals</td>
+            <td></td>
+            <td style="font-family:'DM Mono',monospace; padding-top:10px;  padding-left:12px">{{ total_locum_hours|floatformat:0 }}</td>
+            <td style="color:var(--amber);font-family:'DM Mono',monospace; padding-top:10px;  padding-left:12px">${{ total_locum_cost|floatformat:0 }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
       </table>
     </div>
   </div>
@@ -183,7 +193,13 @@
             <span class="locum-tag">{{ a.covering_physician }}</span>
             {% if a.covered_physician %}<span class="text-muted text-sm">covering {{ a.covered_physician }}</span>{% endif %}
           </div>
-          {% if a.effective_daily_rate %}<div class="text-muted text-sm" style="margin-top:3px;">Rate: ${{ a.effective_daily_rate }}</div>{% endif %}
+          {% if a.covering_physician.hourly_rate or a.hourly_rate_override %}
+          <div class="text-muted text-sm" style="margin-top:3px;">
+            {{ a.hours|floatformat:0 }} hr × ${{ a.effective_hourly_rate|floatformat:2 }} = ${{ a.effective_daily_rate|floatformat:2 }}
+          </div>
+          {% elif a.effective_daily_rate %}
+          <div class="text-muted text-sm" style="margin-top:3px;">Daily: ${{ a.effective_daily_rate }}</div>
+          {% endif %}
         </div>
         {% endfor %}
       {% else %}

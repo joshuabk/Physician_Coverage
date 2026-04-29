@@ -83,12 +83,7 @@
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             Unavailable
           </div>
-          <div class="avail-option" data-value="assigned"
-               style="padding:9px 14px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--amber);"
-               onmouseover="this.style.background='var(--card-hover)'" onmouseout="this.style.background=''">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
-            Assigned
-          </div>
+          
         </div>
       </div>
       {% endfor %}
@@ -138,37 +133,46 @@ function openDropdown(badge) {
   document.querySelectorAll('.avail-dropdown').forEach(d => d.style.display = 'none');
   const cell = badge.closest('.avail-cell');
   const dropdown = cell.querySelector('.avail-dropdown');
+  const isOpen = dropdown.classList.contains('is-open');
+
+  document.querySelectorAll('.avail-dropdown').forEach(d => {
+    d.style.display = 'none';
+    d.classList.remove('is-open');
+  });
+
+  // If this one was already open, we're done (toggled closed)
+  if (isOpen) return;
+
   const currentStatus = cell.dataset.status;
 
   dropdown.querySelectorAll('.avail-option').forEach(opt => {
+
     opt.style.display = opt.dataset.value === currentStatus ? 'none' : 'flex';
   });
 
   dropdown.style.display = 'block';
+  dropdown.classList.add('is-open');
 
   dropdown.querySelectorAll('.avail-option').forEach(opt => {
     opt.onclick = (e) => {
       e.stopPropagation();
       const newStatus = opt.dataset.value;
-      if (newStatus === 'assigned') {
-        alert('To mark a physician as Assigned, use the "+ Assign Coverage" button at the top of the page.');
-        dropdown.style.display = 'none';
-        return;
-      }
+      
       doUpdate(cell, badge, newStatus);
       dropdown.style.display = 'none';
+      dropdown.classList.add('is-open');
     };
   });
-
-  setTimeout(() => {
-    document.addEventListener('click', function closeHandler(e) {
-      if (!cell.contains(e.target)) {
-        dropdown.style.display = 'none';
-        document.removeEventListener('click', closeHandler);
-      }
-    });
-  }, 10);
 }
+  // Global outside-click handler: close any open dropdown when clicking outside a cell
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.avail-cell')) {
+    document.querySelectorAll('.avail-dropdown').forEach(d => {
+      d.style.display = 'none';
+      d.classList.remove('is-open');
+    });
+  }
+})
 
 function doUpdate(cell, badge, newStatus) {
   const physicianId = cell.dataset.physician;

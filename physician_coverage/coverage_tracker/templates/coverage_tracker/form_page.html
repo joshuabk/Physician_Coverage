@@ -41,4 +41,35 @@
     </form>
   </div>
 </div>
+
+<script>
+(function () {
+  var typeSelect = document.getElementById('id_physician_type');
+  if (!typeSelect) return;
+
+  // Find the wrapper div for a given input by its ID.
+  // Walks up to the nearest .form-group, falls back to direct parent.
+  function wrapperFor(inputId) {
+    var el = document.getElementById(inputId);
+    if (!el) return null;
+    return el.closest('.form-group') || el.parentElement;
+  }
+
+  var groups = {
+    hourly_rate:         wrapperFor('id_hourly_rate'),
+    agency:              wrapperFor('id_agency'),
+    total_vacation_days: wrapperFor('id_total_vacation_days'),
+  };
+
+  function apply() {
+    var t = typeSelect.value;
+    if (groups.hourly_rate)         groups.hourly_rate.style.display         = (t === 'locum') ? '' : 'none';
+    if (groups.agency)              groups.agency.style.display              = (t === 'locum') ? '' : 'none';
+    if (groups.total_vacation_days) groups.total_vacation_days.style.display = (t === 'locum' || t === 'psa') ? 'none' : '';
+  }
+
+  typeSelect.addEventListener('change', apply);
+  apply();
+})();
+</script>
 {% endblock %}

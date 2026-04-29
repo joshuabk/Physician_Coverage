@@ -17,6 +17,7 @@
           <th>Name</th>
           <th>Username</th>
           <th>Role</th>
+          <th>Group</th>
           <th>Linked Physician</th>
           <th>Status</th>
           <th>Actions</th>
@@ -29,6 +30,7 @@
             <div class="flex items-center gap-3">
               <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;
                 {% if user.profile.is_admin %}background:rgba(245,166,35,0.2);color:var(--amber);
+                {% elif user.profile.is_physician_admin %}background:rgba(155,127,232,0.18);color:var(--purple);
                 {% else %}background:rgba(0,184,169,0.15);color:var(--teal);{% endif %}">
                 {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
               </div>
@@ -44,10 +46,23 @@
               <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);">
                 ⚙ Administrator
               </span>
+            {% elif user.profile.is_physician_admin %}
+              <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);">
+                🛡 Physician Admin
+              </span>
             {% else %}
               <span class="badge badge-regular">
                 👤 Physician
               </span>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.profile.scope == 'nroc' %}
+              <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);">NROC</span>
+            {% elif user.profile.scope == 'psa' %}
+              <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);">PSA</span>
+            {% else %}
+              <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);">Both</span>
             {% endif %}
           </td>
           <td>
@@ -85,7 +100,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6" style="text-align:center;padding:2rem;" class="empty-state">
+          <td colspan="7" style="text-align:center;padding:2rem;" class="empty-state">
             No user accounts yet. <a href="/users/add/" style="color:var(--teal);">Add one</a>.
           </td>
         </tr>
@@ -97,7 +112,7 @@
 
 <div class="card" style="margin-top:1.25rem;">
   <div class="card-title">About Roles</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.5rem;">
+  <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1rem;margin-top:0.5rem;">
     <div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.2);border-radius:10px;padding:1rem;">
       <div style="font-weight:600;color:var(--amber);margin-bottom:6px;">⚙ Administrator</div>
       <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
@@ -110,12 +125,24 @@
         <li>✓ Full dashboard access</li>
       </ul>
     </div>
+    <div style="background:rgba(155,127,232,0.07);border:1px solid rgba(155,127,232,0.2);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;color:var(--purple);margin-bottom:6px;">🛡 Physician Admin</div>
+      <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
+        <li>✓ View all pending and approved time off</li>
+        <li>✓ Approve / deny time off requests</li>
+        <li>✓ Submit their own time off</li>
+        <li>✗ Cannot see locum rates or costs</li>
+        <li>✗ Cannot assign coverage</li>
+        <li>✗ Cannot add or edit physician records</li>
+        <li>✗ Cannot manage user accounts</li>
+      </ul>
+    </div>
     <div style="background:rgba(0,184,169,0.07);border:1px solid rgba(0,184,169,0.2);border-radius:10px;padding:1rem;">
       <div style="font-weight:600;color:var(--teal);margin-bottom:6px;">👤 Physician</div>
       <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
         <li>✓ Submit time off requests for themselves</li>
-        <li>✓ View their own time off history</li>
-        <li>✓ View regular physician list</li>
+        <li>✓ View team's pending and approved time off</li>
+        <li>✓ View NROC physician list</li>
         <li>✓ View availability calendar</li>
         <li>✗ Cannot see locum rates or costs</li>
         <li>✗ Cannot approve requests or assign coverage</li>

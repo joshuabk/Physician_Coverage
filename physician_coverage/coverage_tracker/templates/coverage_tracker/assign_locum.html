@@ -32,6 +32,7 @@
           <th style="width:150px;">Date</th>
           <th>Locum Physician</th>
           <th>Clinic</th>
+          <th style="width:90px; text-align:center;">Hours</th>
           <th style="width:80px; text-align:center;">Clear</th>
         </tr>
       </thead>
@@ -54,7 +55,7 @@
               {% for opt in row.locum_options %}
               <option value="{{ opt.physician.pk }}"
                 {% if row.existing and row.existing.covering_physician.pk == opt.physician.pk %}selected{% endif %}>
-                {{ opt.physician }}{% if opt.physician.daily_rate %} (${{ opt.physician.daily_rate }}/day){% endif %}{% if opt.has_conflict %} ⚠ conflict{% endif %}
+               {{ opt.physician }}{% if opt.physician.hourly_rate %} {% endif %}{% if opt.has_conflict %} ⚠ conflict{% endif %}
               </option>
               {% endfor %}
             </select>
@@ -71,6 +72,15 @@
             </select>
           </td>
           <td style="text-align:center;">
+           <div style="display:inline-flex; align-items:center; gap:4px;"></div>
+            <input type="number" name="hours_{{ date_key }}"
+                   value="{% if row.existing %}{{ row.existing.hours|floatformat:'2' }}{% else %}8.00{% endif %}"
+                   step="0.25" min="0" max="24"
+                   placeholder="8.00"
+                   class="form-control" style="font-size:13px; text-align:center; padding:6px 4px;">
+              </div>
+          </td>
+           <td style="text-align:center;">
             {% if row.is_covered %}
             <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:var(--red);">
               <input type="checkbox" name="clear_{{ date_key }}" value="1" style="accent-color:var(--red);">

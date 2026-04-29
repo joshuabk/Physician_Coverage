@@ -21,11 +21,14 @@
   </div>
   <div class="flex gap-2">
     <a href="/physicians/{{ physician.pk }}/edit/" class="btn btn-ghost">Edit</a>
-    {% if physician.is_regular %}
-    <a href="/time-off/add/?physician={{ physician.pk }}" class="btn btn-primary">+ Time Off Request</a>
-    {% else %}
+    {% if not physician.is_regular %}
     <a href="/coverage/add/" class="btn btn-primary">+ Assign Coverage</a>
     {% endif %}
+    <form method="post" action="/physicians/{{ physician.pk }}/delete/" style="display:inline;"
+          onsubmit="return confirm('Delete {{ physician }}? If they have historical time off or coverage records, they will be deactivated instead of deleted to preserve history.');">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
   </div>
 </div>
 
@@ -52,8 +55,8 @@
 {% else %}
 <!-- Locum physician stats -->
 <div class="stats-grid">
-  <div class="stat-card"><div class="stat-label">Daily Rate</div><div class="stat-value" style="font-size:20px;">{% if physician.daily_rate %}${{ physician.daily_rate }}{% else %}—{% endif %}</div><div class="stat-sub">standard rate</div></div>
-  <div class="stat-card"><div class="stat-label">Days Worked ({{ year }})</div><div class="stat-value" style="color:var(--purple);">{{ coverage_days }}</div><div class="stat-sub">coverage shifts</div></div>
+  <div class="stat-card"><div class="stat-label">Hourly Rate</div><div class="stat-value" style="font-size:20px;">{% if physician.hourly_rate %}${{ physician.hourly_rate|floatformat:2 }}{% else %}—{% endif %}</div><div class="stat-sub">standard rate</div></div>
+  <div class="stat-card"><div class="stat-label">Hours Worked ({{ year }})</div><div class="stat-value" style="color:var(--purple);">{{ coverage_hours|floatformat:0 }}</div><div class="stat-sub">total hours</div></div>
   <div class="stat-card"><div class="stat-label">Total Cost ({{ year }})</div><div class="stat-value" style="color:var(--amber);font-size:20px;">${{ coverage_cost|floatformat:0 }}</div><div class="stat-sub">total billed</div></div>
 </div>
 {% endif %}
@@ -104,14 +107,16 @@
     <div class="card-title">Coverage Assignments — {{ year }}</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Clinic</th><th>Covering</th><th>Rate</th></tr></thead>
+        <thead><tr><th>Date</th><th>Clinic</th><th>Covering</th><th>Hours</th><th>Rate</th></tr></thead>
         <tbody>
           {% for a in coverage_this_year %}
           <tr>
             <td><strong>{{ a.date|date:"M j, Y" }}</strong></td>
             <td>{{ a.clinic }}</td>
             <td class="text-muted">{% if a.covered_physician %}{{ a.covered_physician }}{% else %}—{% endif %}</td>
-            <td class="money">${{ a.effective_daily_rate }}</td>
+            <td style="font-family:'DM Mono',monospace;">{{ a.hours|floatformat:0 }}</td>
+            <td class="money">${{ a.effective_hourly_rate|floatformat:2 }}</td>
+            <td class="money" style="color:var(--amber); font-weight:500;">${{ a.effective_daily_rate|floatformat:2 }}</td>
           </tr>
           {% empty %}
           <tr><td colspan="4" class="empty-state">No assignments this year.</td></tr>

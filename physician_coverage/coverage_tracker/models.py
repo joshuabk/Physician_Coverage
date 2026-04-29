@@ -47,7 +47,7 @@ def check_holiday(day):
 
 class Physician(models.Model):
     PHYSICIAN_TYPE_CHOICES = [
-        ('regular', 'Regular Physician'),
+        ('regular', 'NROC Physician'),
         ('locum', 'Locum / Covering Physician'),
         ('psa', 'PSA Physician'),
     ]
@@ -60,11 +60,15 @@ class Physician(models.Model):
     physician_type = models.CharField(max_length=10, choices=PHYSICIAN_TYPE_CHOICES, default='regular')
     total_vacation_days = models.PositiveIntegerField(
         default=20,
-        help_text="Annual vacation day allocation (for regular physicians)"
+        help_text="Annual vacation day allocation (for NROC physicians)"
     )
     daily_rate = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
-        help_text="Daily rate in USD (for locum physicians)"
+        help_text="Legacy / standard daily rate (kept for reference — hourly rate is used for pay)"
+    )
+    hourly_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Hourly rate for locum physicians. Daily pay = hourly rate × hours worked."
     )
     agency = models.CharField(
         max_length=200, blank=True,
@@ -113,12 +117,29 @@ class Physician(models.Model):
         if year is None:
             year = timezone.now().year
         return CoverageAssignment.objects.filter(covering_physician=self, date__year=year).count()
+    
+    def total_coverage_hours(self, year=None):
+        if year is None:
+            year = timezone.now().year
+        from django.db.models import Sum
+        result = CoverageAssignment.objects.filter(
+            covering_physician=self, date__year=year
+        ).aggregate(total=Sum('hours'))
+        return result['total'] or Decimal('0.00')
 
     def total_coverage_cost(self, year=None):
         if year is None:
             year = timezone.now().year
-        assignments = CoverageAssignment.objects.filter(covering_physician=self, date__year=year)
-        return sum(a.cost for a in assignments)
+        assignments = CoverageAssignment.objects.filter(
+            covering_physician=self, date__year=year
+        )
+        total = Decimal('0.00')
+        for a in assignments:
+            rate = a.hourly_rate_override if a.hourly_rate_override is not None else self.hourly_rate
+            if rate is None:
+                continue
+            total += (rate * a.hours)
+        return total.quantize(Decimal('0.01'))
 
     def requested_coverage_days(self, year=None):
         if year is None:
@@ -134,8 +155,8 @@ class Clinic(models.Model):
         'Physician',
         blank=True,
         related_name='assigned_clinics',
-        limit_choices_to={'physician_type__in': ['regular', 'psa']},
-        help_text= "Regular and PSA physicians permanently assigned to this clinic"
+        limit_choices_to={'physician_type__in': ['regualr', 'psa']},
+        help_text= "NROC and PSA physicians permanently assigned to this clinic"
     )
     is_active = models.BooleanField(default=True)
 
@@ -191,6 +212,7 @@ class TimeOffRequest(models.Model):
 
 class CoverageAssignment(models.Model):
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='coverage_assignments')
+    hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     covering_physician = models.ForeignKey(
         Physician, on_delete=models.CASCADE, related_name='coverage_assignments',
         limit_choices_to={'physician_type': 'locum'},
@@ -200,9 +222,15 @@ class CoverageAssignment(models.Model):
         Physician, on_delete=models.CASCADE, related_name='covered_assignments',
         null=True, blank=True,
         limit_choices_to={'physician_type': 'regular'},
-        help_text="Regular physician being covered (optional)"
+        help_text="NROC physician being covered (optional)"
     )
     date = models.DateField()
+
+    hourly_rate_override = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Override the locum's standard hourly rate for this specific assignment"
+    )
+
     daily_rate_override = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
         help_text="Override the locum's standard daily rate for this specific assignment"
@@ -216,12 +244,27 @@ class CoverageAssignment(models.Model):
 
     def __str__(self):
         return f"{self.clinic} — {self.covering_physician} on {self.date}"
+    
+
+
+    @property
+    def effective_hourly_rate(self):
+        """Hourly rate used for pay — per-assignment override beats physician default."""
+        if self.hourly_rate_override is not None:
+            return self.hourly_rate_override
+        return self.covering_physician.hourly_rate or Decimal('0.00')
 
     @property
     def effective_daily_rate(self):
+
+        if self.hourly_rate_override is not None or self.covering_physician.hourly_rate:
+            return (self.effective_hourly_rate * self.hours).quantize(Decimal('0.01'))
+        # Legacy fallback
         if self.daily_rate_override is not None:
             return self.daily_rate_override
+        
         return self.covering_physician.daily_rate or Decimal('0.00')
+       
 
     @property
     def cost(self):
@@ -270,25 +313,51 @@ class CoverageRequest(models.Model):
 
 
 class UserProfile(models.Model):
-    """Extends Django User with role: admin or physician."""
+    """Extends Django User with role and scope.
+
+    Scope determines which physicians' time off a non-admin user can see:
+    - 'nroc' → NROC physicians only
+    - 'psa'  → PSA physicians only
+    - 'all'  → both (admins always behave as 'all' regardless of scope)
+    """
     ROLE_CHOICES = [
         ('admin', 'Administrator'),
+        ('physician_admin', 'Physician Administrator'),
         ('physician', 'Physician'),
+    ]
+    SCOPE_CHOICES = [
+        ('nroc', 'NROC Physicians'),
+        ('psa', 'PSA Physicians'),
+        ('all', 'Both NROC and PSA'),
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='physician')
+    scope = models.CharField(
+        max_length=10, choices=SCOPE_CHOICES, default='nroc',
+        help_text="Which physician group this login represents."
+    )
     physician = models.OneToOneField(
         Physician, on_delete=models.SET_NULL, null=True, blank=True,
-        help_text="Link this login to a physician record"
+        help_text="Optional: link to a specific physician record (not required for shared logins)."
     )
 
     @property
     def is_admin(self):
         return self.role == 'admin' or self.user.is_superuser
+    
+    @property
+    def is_physician_admin(self):
+        return self.role == 'physician_admin'
+
 
     @property
     def is_physician(self):
         return self.role == 'physician'
+    
+    @property
+    def can_approve_time_off(self):
+        """True for full admins and physician administrators."""
+        return self.is_admin or self.is_physician_admin
 
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()})"
