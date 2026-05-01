@@ -773,20 +773,34 @@ def update_availability(request):
                 from django.http import JsonResponse
                 return JsonResponse({'error': 'Use the coverage assignment form to assign coverage.'}, status=400)
 
-            if status in ('available', 'unavailable'):
-                is_available = (status == 'available')
-                PhysicianAvailability.objects.update_or_create(
+            if status not in ('available', 'unavailable'):
+                return JsonResponse({'error': 'Invalid status.'}, status=400)
+
+
+            removed = CoverageAssignment.objects.filter(
+                covering_physician=physician,
+                date=target_date,
+                ).delete()[0]
+
+            is_available = (status == 'available')
+            PhysicianAvailability.objects.update_or_create(
                     physician=physician,
                     date=target_date,
                     defaults={'is_available': is_available}
                 )
             from django.http import JsonResponse
-            return JsonResponse({'ok': True, 'status': status})
+
+            return JsonResponse({
+            'ok': True,
+            'status': status,
+            'assignments_removed': removed,
+        })
         except Exception as e:
-            from django.http import JsonResponse
+            
             return JsonResponse({'error': str(e)}, status=400)
-    from django.http import JsonResponse
-    return JsonResponse({'error': 'POST required'}, status=405)
+    
+        except Physician.DoesNotExist:
+            return JsonResponse({'error': 'Physician not found.'}, status=404)
 
 
 @admin_required
@@ -931,9 +945,16 @@ def assign_locum_to_time_off(request, pk):
                     existing.delete()
                 continue
 
-            if not locum_id or not clinic_id:
-                continue  # Skip days left blank
+            if locum_id and not clinic_id:
+                errors.append(f'{day.strftime("%b %d")}: A locum is selected but no clinic is assigned.')
+                continue
+            if clinic_id and not locum_id:
+                errors.append(f'{day.strftime("%b %d")}: A clinic is selected but no locum is assigned.')
+                continue
+            if not locum_id and not clinic_id:
+                continue  # Both blank — intentionally skipped
 
+            
             try:
                 locum_id = int(locum_id)
                 clinic_id = int(clinic_id)
@@ -970,6 +991,12 @@ def assign_locum_to_time_off(request, pk):
                     notes=f'Assigned for time off: {req.start_date} – {req.end_date}',
                 )
                 saved += 1
+        if errors:
+            for err in errors:
+                messages.error(request, err)
+            # ... rebuild day_rows ...
+            return redirect('assign_locum_to_time_off', pk=req.pk)
+
 
         messages.success(request, f'Coverage updated: {saved} day(s) saved for {req.physician}.')
         return redirect('approved_time_off_coverage')
@@ -979,6 +1006,10 @@ def assign_locum_to_time_off(request, pk):
     clinics = Clinic.objects.filter(is_active=True)
     physician_clinics = list(req.physician.assigned_clinics.filter(is_active=True))
     default_clinic = physician_clinics[0] if physician_clinics else None
+
+
+
+    
 
     day_rows = []
     for day in all_dates:
@@ -1049,11 +1080,29 @@ def mark_availability(request):
 @login_required_custom
 def psa_coverage_request_view(request):
     year = int(request.GET.get('year', date.today().year))
-    physicians = Physician.objects.filter(is_active=True, physician_type='psa')
+    physicians = Physician.objects.filter(is_active=True, physician_type='psa').order_by('last_name', 'first_name')
     data = []
     for p in physicians:
-        reqs = CoverageRequest.objects.filter(physician=p, requested_date__year=year).order_by('requested_date')
-        data.append({'physician': p, 'requests': reqs, 'total': reqs.count()})
+        # Days where a locum actually covered this PSA physician
+        assignments = CoverageAssignment.objects.filter(
+            covered_physician=p, date__year=year,
+        ).select_related('covering_physician', 'clinic').order_by('date')
+
+
+
+        total_hours = sum((a.hours for a in assignments), Decimal('0.00'))
+        total_cost = sum((a.cost for a in assignments), Decimal('0.00'))
+
+        data.append({
+            'physician': p,
+            'assignments': assignments,
+            'total': len(assignments),
+            'total_hours': total_hours,
+            'total_cost': total_cost,
+        })
+    # Sort: physicians with the most locum-covered days first
+    data.sort(key=lambda r: r['total'], reverse=True)
+
     return render(request, 'coverage_tracker/psa_coverage_requests.html', {
         'data': data,
         'year': year,

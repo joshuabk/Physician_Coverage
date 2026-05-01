@@ -1,10 +1,10 @@
 {% extends "coverage_tracker/base.html" %}
-{% block title %}PSA Coverage Requests{% endblock %}
+{% block title %}PSA Locum Usage{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>PSA Physicians — Requested Coverage Days</h1>
-    <p class="text-muted text-sm mt-1">Track the number of coverage days requested by PSA physicians in {{ year }}</p>
+    <h1>PSA Physicians — Locum Usage</h1>
+    <p class="text-muted text-sm mt-1">Days each PSA physician was covered by a locum in {{ year }}</p>
   </div>
   <div class="flex gap-2">
     <form method="get" style="display:flex;gap:8px;align-items:center;">
@@ -12,20 +12,56 @@
         style="width:76px;background:var(--card);border:1px solid var(--border-2);border-radius:7px;color:var(--text);padding:5px 9px;font-size:13px;outline:none;">
       <button type="submit" class="btn btn-ghost btn-sm">Go</button>
     </form>
-    <a href="/physicians/psa/coverage-requests/add/" class="btn btn-primary">+ Add Request</a>
   </div>
 </div>
 
 <div class="type-tabs">
   <a href="/physicians/?type=regular&year={{ year }}" class="type-tab">NROC Physicians</a>
-  <a href="/physicians/?type=locum" class="type-tab">Locum Physicians</a>
   <a href="/physicians/?type=psa&year={{ year }}" class="type-tab">PSA Physicians</a>
-  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="type-tab active">Track # of Requested Coverage Days</a>
+  <a href="/physicians/?type=locum" class="type-tab">Locum Physicians</a> 
+  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="type-tab active">📋 PSA Coverage Use</a>
 </div>
 
 {% if data %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <h3 style="margin:0 0 1rem;font-size:14px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);">Summary — {{ year }}</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+           <th>PSA Physician</th>
+          <th style="text-align:right;">Days Covered</th>
+          <th style="text-align:right;">Total Hours</th>
+          <th style="text-align:right;">Total Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in data %}
+        <tr>
+          <td>
+            <a href="#physician-{{ row.physician.pk }}" style="color:var(--text);text-decoration:none;font-weight:500;">
+              Dr. {{ row.physician.first_name }} {{ row.physician.last_name }}
+            </a>
+          </td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:600;{% if row.total > 0 %}color:var(--teal);{% else %}color:var(--text-3);{% endif %}">
+            {{ row.total }}
+          </td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;{% if row.total > 0 %}color:var(--text);{% else %}color:var(--text-3);{% endif %}">
+            {{ row.total_hours|floatformat:2 }}
+          </td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;{% if row.total > 0 %}color:var(--text);{% else %}color:var(--text-3);{% endif %}">
+            ${{ row.total_cost|floatformat:2 }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% for row in data %}
-<div class="card" style="margin-bottom:1.25rem;">
+{% if row.assignments %}
+<div id="physician-{{ row.physician.pk }}" class="card" style="margin-bottom:1.25rem;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid var(--border);">
     <div class="flex items-center gap-3">
       <div class="avatar avatar-locum" style="background:rgba(155,89,182,0.25);color:#c39bd3;">
@@ -40,52 +76,36 @@
     </div>
     <div style="text-align:right;">
       <div style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:var(--teal);">{{ row.total }}</div>
-      <div class="text-muted text-sm">requested day{{ row.total|pluralize }} in {{ year }}</div>
+      <div class="text-muted text-sm">day{{ row.total|pluralize }} covered by locum in {{ year }}</div>
     </div>
   </div>
 
-  {% if row.requests %}
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Requested Date</th>
-          <th>Status</th>
-          <th>Notes</th>
-          <th>Added</th>
-          <th></th>
+          <th>Date</th>
+          <th>Locum</th>
+          <th>Clinic</th>
+          <th style="text-align:right;">Hours</th>
         </tr>
       </thead>
       <tbody>
-        {% for req in row.requests %}
+        {% for a in row.assignments %}
         <tr>
-          <td style="font-family:'DM Mono',monospace;font-weight:500;">{{ req.requested_date|date:"M j, Y" }}</td>
-          <td>
-            {% if req.status == 'approved' %}
-              <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);">Approved</span>
-            {% elif req.status == 'denied' %}
-              <span class="badge" style="background:rgba(224,84,84,0.15);color:var(--red);">Denied</span>
-            {% else %}
-              <span class="badge badge-pending">Pending</span>
-            {% endif %}
-          </td>
-          <td class="text-muted">{{ req.notes|default:"—" }}</td>
-          <td class="text-muted text-sm">{{ req.created_at|date:"M j" }}</td>
-          <td>
-            <a href="/physicians/psa/coverage-requests/{{ req.pk }}/delete/"
-               onclick="return confirm('Delete this coverage request?')"
-               class="btn btn-ghost btn-sm" style="color:var(--red);">Delete</a>
-          </td>
+          <td style="font-family:'DM Mono',monospace;font-weight:500;">{{ a.date|date:"M j, Y" }}</td>
+          <td>{{ a.covering_physician }}</td>
+          <td class="text-muted">{{ a.clinic.name|default:"—" }}</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;">{{ a.hours }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  {% else %}
-  <div class="empty-state" style="padding:1rem;">No coverage requests recorded for {{ year }}.</div>
-  {% endif %}
 </div>
+{% endif %}
 {% endfor %}
+
 {% else %}
 <div class="card">
   <div class="empty-state" style="padding:2rem;text-align:center;">

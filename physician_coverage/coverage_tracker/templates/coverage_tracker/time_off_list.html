@@ -52,13 +52,18 @@
         <tr>
           <td>
             {% if is_admin %}
-            <a href="/physicians/{{ req.physician.pk }}/" style="color:var(--text); text-decoration:none; font-weight:500;">
-              {{ req.physician }}
-            </a>
+           <a href="/physicians/{{ req.physician.pk }}/" style="color:var(--text); text-decoration:none; font-weight:500;">
+           {{ req.physician }}
+           </a>
+            {% if req.physician.is_regular %}
+             <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);margin-left:6px;">NROC</span>
+           {% elif req.physician.is_psa %}
+            <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);margin-left:6px;">PSA</span>
+            {% endif %}
             {% else %}
             <span style="font-weight:500;">{{ req.physician }}</span>
-            {% endif %}
-          </td>
+          {% endif %}
+        </td>
           
           <td class="text-muted">{{ req.start_date|date:"M j" }} – {{ req.end_date|date:"M j, Y" }}</td>
           <td style="font-family:'DM Mono',monospace;">{{ req.duration_days }}</td>
