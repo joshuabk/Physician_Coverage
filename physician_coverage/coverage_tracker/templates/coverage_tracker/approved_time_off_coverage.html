@@ -59,14 +59,26 @@
         <div style="margin-top:12px; display:flex; flex-direction:column; gap:5px;">
           {% for day_info in item.day_coverage %}
           <div style="display:flex; align-items:center; gap:10px; font-size:12.5px;">
-            <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:{% if day_info.assignment %}var(--green){% else %}var(--amber){% endif %};"></span>
-            <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
-            {% if day_info.assignment %}
+            {% if day_info.assignment.no_coverage_needed %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#14b8a6;"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+              <span class="locum-tag" style="font-size:11.5px; padding:2px 8px; background:rgba(20,184,166,0.12); color:#0f766e;">
+                <strong>Coverage not needed</strong>
+                <span style="color:var(--text-3); font-weight:normal;">— {{ day_info.assignment.clinic }}</span>
+                {% if day_info.assignment.no_coverage_reason %}
+                  <span style="color:var(--text-3); font-style:italic; font-weight:normal;">({{ day_info.assignment.no_coverage_reason }})</span>
+                {% endif %}
+              </span>
+            {% elif day_info.assignment.covering_physician %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
               <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
                 {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
                 <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
               </span>
             {% else %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--amber);"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
               <span style="color:var(--amber); font-size:12px; font-style:italic;">No locum assigned</span>
             {% endif %}
           </div>
@@ -110,12 +122,31 @@
         <div style="margin-top:12px; display:flex; flex-direction:column; gap:5px;">
           {% for day_info in item.day_coverage %}
           <div style="display:flex; align-items:center; gap:10px; font-size:12.5px;">
-            <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);"></span>
-            <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
-            <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
-              {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
-              <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
-            </span>
+            {% if day_info.assignment.no_coverage_needed %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#14b8a6;"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+              <span class="locum-tag" style="font-size:11.5px; padding:2px 8px; background:rgba(20,184,166,0.12); color:#0f766e;">
+                <strong>Coverage not needed</strong>
+                <span style="color:var(--text-3); font-weight:normal;">— {{ day_info.assignment.clinic }}</span>
+                {% if day_info.assignment.no_coverage_reason %}
+                  <span style="color:var(--text-3); font-style:italic; font-weight:normal;">({{ day_info.assignment.no_coverage_reason }})</span>
+                {% endif %}
+              </span>
+            {% elif day_info.assignment.covering_physician %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+              <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
+                {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
+                <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
+              </span>
+            {% else %}
+              <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:var(--green);"></span>
+              <span style="color:var(--text-2); min-width:100px;">{{ day_info.date|date:"D, M j" }}</span>
+              <span class="locum-tag" style="font-size:11.5px; padding:2px 8px;">
+                {{ day_info.assignment.covering_physician.first_name }} {{ day_info.assignment.covering_physician.last_name }}
+                <span style="color:var(--text-3);">@ {{ day_info.assignment.clinic }}</span>
+              </span>
+            {% endif %}
           </div>
           {% endfor %}
         </div>

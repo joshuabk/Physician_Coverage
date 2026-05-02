@@ -25,7 +25,7 @@
       <div style="min-width:190px;font-size:11px;color:var(--text-3);padding:0 8px;">Physician</div>
       {% for d in calendar_days %}
       <div style="min-width:56px;text-align:center;" data-header-date="{{ d|date:'Y-m-d' }}">
-        <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.4px;">{{ d|date:"D" }}</div>
+         <div style="font-size:10px;color:{% if d in holiday_set %}var(--purple){% else %}var(--text-3){% endif %};text-transform:uppercase;letter-spacing:0.4px;">{{ d|date:"D" }}</div>
         <div style="font-size:12px;font-weight:600;color:{% if d == today %}var(--teal){% else %}var(--text-2){% endif %};font-family:'DM Mono',monospace;">{{ d|date:"j" }}</div>
       </div>
       {% endfor %}
@@ -54,6 +54,11 @@
       <div class="avail-cell" style="min-width:56px;height:48px;display:flex;align-items:center;justify-content:center;position:relative;"
            data-physician="{{ row.physician.pk }}"
            data-status="{{ status }}">
+        {% if status == 'holiday' %}
+        <div style="width:34px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(155,89,182,0.12);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+        </div>
+        {% else %}
         <div class="status-badge" onclick="openDropdown(this)"
              style="width:34px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 0.1s;
                {% if status == 'assigned' %}background:rgba(245,166,35,0.2);
@@ -85,6 +90,7 @@
           </div>
           
         </div>
+         {% endif %}
       </div>
       {% endfor %}
     </div>
@@ -105,6 +111,10 @@
     <div class="flex items-center gap-2">
       <div style="width:14px;height:14px;border-radius:3px;background:rgba(224,84,84,0.15);"></div>
       <span style="font-size:12px;color:var(--text-3);">Unavailable</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div style="width:14px;height:14px;border-radius:3px;background:rgba(155,89,182,0.12);"></div>
+      <span style="font-size:12px;color:var(--text-3);">Holiday</span>
     </div>
     <div style="margin-left:auto;font-size:11px;color:var(--text-3);">💡 Click any cell to change status</div>
   </div>
@@ -130,8 +140,11 @@ document.querySelectorAll('.avail-cell').forEach((cell, globalIdx) => {
 });
 
 function openDropdown(badge) {
-  document.querySelectorAll('.avail-dropdown').forEach(d => d.style.display = 'none');
+
   const cell = badge.closest('.avail-cell');
+  if (cell.dataset.status === 'holiday') return;  // holidays are not clickable
+  document.querySelectorAll('.avail-dropdown').forEach(d => d.style.display = 'none');
+  
   const dropdown = cell.querySelector('.avail-dropdown');
   const isOpen = dropdown.classList.contains('is-open');
 

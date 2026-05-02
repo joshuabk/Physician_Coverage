@@ -215,6 +215,7 @@ class CoverageAssignment(models.Model):
     hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     covering_physician = models.ForeignKey(
         Physician, on_delete=models.CASCADE, related_name='coverage_assignments',
+        null=True, blank=True,  
         limit_choices_to={'physician_type': 'locum'},
         help_text="Locum physician providing coverage"
     )
@@ -225,6 +226,15 @@ class CoverageAssignment(models.Model):
         help_text="NROC physician being covered (optional)"
     )
     date = models.DateField()
+
+    no_coverage_needed = models.BooleanField(
+        default=False,
+        help_text="Mark this day as resolved without assigning a locum (e.g., half day, shift swapped)."
+    )
+    no_coverage_reason = models.CharField(
+        max_length=255, blank=True,
+        help_text="Required reason when 'no coverage needed' is set (e.g., 'half day', 'physician swapped shift')."
+    )
 
     hourly_rate_override = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
@@ -240,29 +250,50 @@ class CoverageAssignment(models.Model):
 
     class Meta:
         ordering = ['date', 'clinic']
-        unique_together = ['clinic', 'covering_physician', 'date']
+        # OLD: unique_together = ['clinic', 'covering_physician', 'date']
+        # That breaks once covering_physician can be null (multiple "no coverage"
+        # rows would collide). Replaced with conditional constraints:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['clinic', 'covering_physician', 'date'],
+                condition=models.Q(covering_physician__isnull=False),
+                name='unique_clinic_locum_date_when_assigned',
+            ),
+            # One "no coverage needed" marker per covered physician per day
+            models.UniqueConstraint(
+                fields=['covered_physician', 'date'],
+                condition=models.Q(no_coverage_needed=True),
+                name='unique_no_coverage_per_covered_physician_per_day',
+            ),
+        ]
+
 
     def __str__(self):
         return f"{self.clinic} — {self.covering_physician} on {self.date}"
     
+    @property
+    def is_no_coverage(self):
+        return self.no_coverage_needed
 
 
     @property
     def effective_hourly_rate(self):
         """Hourly rate used for pay — per-assignment override beats physician default."""
+        if self.no_coverage_needed or self.covering_physician is None:   # ← NEW guard
+            return Decimal('0.00')
         if self.hourly_rate_override is not None:
             return self.hourly_rate_override
         return self.covering_physician.hourly_rate or Decimal('0.00')
-
+    
     @property
     def effective_daily_rate(self):
-
+        if self.no_coverage_needed or self.covering_physician is None:   # ← NEW guard
+            return Decimal('0.00')
         if self.hourly_rate_override is not None or self.covering_physician.hourly_rate:
-            return (self.effective_hourly_rate * self.hours).quantize(Decimal('0.01'))
-        # Legacy fallback
+            hours = self.hours if self.hours is not None else Decimal('0.00')   # ← null-safe
+            return (self.effective_hourly_rate * hours).quantize(Decimal('0.01'))
         if self.daily_rate_override is not None:
             return self.daily_rate_override
-        
         return self.covering_physician.daily_rate or Decimal('0.00')
        
 

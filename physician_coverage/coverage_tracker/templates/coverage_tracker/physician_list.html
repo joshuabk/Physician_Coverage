@@ -37,19 +37,24 @@
     Locum Physicians
   </a>
   {% endif %}
-  {% if physician_type == 'psa' %}
-  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="type-tab" style="margin-left:8px;border-left:2px solid var(--border-2);padding-left:12px;">
+  
+</div>
+
+{% if physician_type == 'psa' %}
+<div style="margin-bottom:1rem;">
+  <a href="/physicians/psa/coverage-requests/?year={{ year }}" class="btn btn-ghost">
     📋 PSA Coverage Use
   </a>
-  {% endif %}
 </div>
+{% endif %}
+
 
 {% if physician_type == 'psa' or physician_type == 'regular' %}
 <div class="card">
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Physician</th><th>Clinics</th><th>Used</th><th>Pending</th>{% if physician_type != 'psa' %}<th>Remaining</th>{% endif %}<th>Progress</th><th></th></tr>
+        <tr><th>Physician</th><th>Clinics</th><th>Used</th><th>Pending</th>{% if physician_type != 'psa' %}<th>Remaining</th><th>Progress</th>{% endif %}<th></th></tr>
       </thead>
       <tbody>
         {% for s in summaries %}
@@ -78,13 +83,14 @@
             <span style="font-weight:500;color:{% if s.days_remaining <= 3 %}var(--red){% elif s.days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};font-family:'DM Mono',monospace;">{{ s.days_remaining }}</span>
             <span class="text-muted"> / {{ s.total }}</span>
           </td>
-          {% endif %}
+          
           <td style="width:120px;">
             {% if s.total > 0 %}
             <div class="progress-wrap">
               <div class="progress-bar {% if s.days_remaining <= 3 %}red{% elif s.days_remaining <= 7 %}amber{% else %}green{% endif %}" style="width:{% widthratio s.days_taken s.total 100 %}%"></div>
             </div>
             {% endif %}
+          {% endif %}
           </td>
           <td><div class="flex gap-2">
             <a href="/physicians/{{ s.physician.pk }}/" class="btn btn-ghost btn-sm">View</a>

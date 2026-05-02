@@ -66,6 +66,27 @@ def check_holiday(day):
     is_holiday = (day.month, day.day) in HOLIDAYS
     return is_holiday
 
+def get_extra_workdays(year):
+    """Weekend days that should be treated as workdays (schedulable)."""
+    extra = set()
+    # Sunday before Thanksgiving
+    nov_cal = calendar.monthcalendar(year, 11)
+    thursdays = [week[3] for week in nov_cal if week[3] != 0]
+    fourth_thursday = thursdays[3]
+    thanksgiving = date(year, 11, fourth_thursday)
+    sunday_before = thanksgiving - timedelta(days=4)  # Thu - 4 = Sun
+    extra.add(sunday_before)
+    return extra
+
+def is_workday(d, holidays=None, extra_workdays=None):
+    """Return True if d is a schedulable workday (Mon-Fri, or an extra workday, minus holidays)."""
+    if holidays and d in holidays:
+        return False
+    if extra_workdays and d in extra_workdays:
+        return True
+    return d.weekday() < 5
+
+
 
 
 @admin_required
@@ -76,9 +97,9 @@ def dashboard(request):
     regular_physicians = Physician.objects.filter(is_active=True, physician_type='regular')
     locum_physicians = Physician.objects.filter(is_active=True, physician_type='locum')
 
-    todays_coverage = CoverageAssignment.objects.filter(date=today).select_related(
-        'clinic', 'covering_physician', 'covered_physician'
-    )
+    todays_coverage = CoverageAssignment.objects.filter(
+        date=today, no_coverage_needed=False                              # ← added filter
+    ).select_related('clinic', 'covering_physician', 'covered_physician')
     requests = TimeOffRequest.objects.filter(status='cancelled')
     print(f" requests {requests}")
     #for req in list(requests):
@@ -369,7 +390,7 @@ def time_off_list(request):
             else:
                 coverage_status = 'none'
             # Get unique locums
-            locum_names = list({a.covering_physician for a in assignments})
+            locum_names = list({a.covering_physician for a in assignments if a.covering_physician_id})
             coverage = locum_names
         enriched_requests.append({
             'req': req,
@@ -531,9 +552,17 @@ def clinic_list(request):
     clinic_data = []
     for clinic in clinics:
         assignments = CoverageAssignment.objects.filter(
-            clinic=clinic, date=view_date
+            clinic=clinic, date=view_date, no_coverage_needed=False       # ← added
         ).select_related('covering_physician', 'covered_physician')
-        regular_out = [p for p in clinic.regular_physicians.all() if p.id in out_ids]
+        no_cov_physician_ids = set(                                       # ← NEW
+        CoverageAssignment.objects.filter(
+            date=view_date, no_coverage_needed=True
+        ).values_list('covered_physician_id', flat=True)
+        )
+        regular_out = [
+        p for p in clinic.regular_physicians.all()
+        if p.id in out_ids and p.id not in no_cov_physician_ids       # ← updated
+        ]
         clinic_data.append({
             'clinic': clinic,
             'assignments': assignments,
@@ -615,7 +644,7 @@ def locum_costs(request):
     month = request.GET.get('month', '')
 
     assignments = CoverageAssignment.objects.filter(
-        date__year=year
+        date__year=year, no_coverage_needed=False
     ).select_related('covering_physician', 'clinic', 'covered_physician')
 
     if month:
@@ -649,6 +678,8 @@ def locum_costs(request):
     # Monthly breakdown
     monthly_totals = {}
     for a in CoverageAssignment.objects.filter(date__year=year).select_related('covering_physician'):
+        if a.no_coverage_needed or a.covering_physician is None:          # ← guard
+            continue
         m = a.date.month
         if m not in monthly_totals:
             monthly_totals[m] = {'hours': 0, 'cost': Decimal('0.00')}
@@ -700,7 +731,12 @@ def availability_view(request):
     if all_days[-1].year != week_start.year:
         holidays |= set(get_holidays(all_days[-1].year))
 
-    calendar_days = [d for d in all_days if d.weekday() < 5 and d not in holidays]
+    extra = get_extra_workdays(week_start.year)
+    if all_days[-1].year != week_start.year:
+        extra |= get_extra_workdays(all_days[-1].year)
+   
+
+    calendar_days = [d for d in all_days if is_workday(d, holidays, extra) or (d in holidays and d.weekday() < 5)]
 
 
     # All active physicians (not just locums)
@@ -736,7 +772,9 @@ def availability_view(request):
     for p in all_physicians:
         row = []
         for d in calendar_days:
-            if (p.id, d) in assigned_set:
+            if d in holidays:
+                row.append('holiday')
+            elif (p.id, d) in assigned_set:
                 row.append('assigned')
             elif (p.id, d) in off_set:
                 row.append('unavailable')
@@ -751,6 +789,7 @@ def availability_view(request):
         'calendar_days': calendar_days,
         'view_date': view_date,
         'today': date.today(),
+        'holiday_set': holidays,
     })
 
 
@@ -832,7 +871,8 @@ def approved_time_off_coverage(request):
         year = req.start_date.year
         holidays = get_holidays(year)
         while d <= req.end_date:
-            if d.weekday()<5 and not d in holidays:
+            extra = get_extra_workdays(year)
+            if is_workday(d, set(holidays), extra):
                 all_dates.append(d)
             d += timedelta(days=1)
 
@@ -933,10 +973,14 @@ def assign_locum_to_time_off(request, pk):
 
         for day in all_dates:
             date_key = day.strftime('%Y-%m-%d')
+            mode = request.POST.get(f'mode_{date_key}', 'locum')    
             locum_id = request.POST.get(f'locum_{date_key}')
             clinic_id = request.POST.get(f'clinic_{date_key}')
             clear = request.POST.get(f'clear_{date_key}')
             hours_raw = request.POST.get(f'hours_{date_key}', '').strip()
+            no_cov_reason = request.POST.get(                              # ← NEW
+                f'no_coverage_reason_{date_key}', ''
+            ).strip()
 
             existing = existing_assignments.get(day)
 
@@ -944,6 +988,54 @@ def assign_locum_to_time_off(request, pk):
                 if existing:
                     existing.delete()
                 continue
+
+
+            if mode == 'none':
+                if not no_cov_reason:
+                    errors.append(
+                        f'{day.strftime("%b %d")}: A reason is required when marking '
+                        f'a day as "no coverage needed".'
+                    )
+                    continue
+                if not clinic_id:
+                    errors.append(
+                        f'{day.strftime("%b %d")}: A clinic must still be assigned '
+                        f'to the day off, even when no coverage is needed.'
+                    )
+                    continue
+                try:
+                    clinic_id_int = int(clinic_id)
+                except (ValueError, TypeError):
+                    continue
+                clinic = clinics.get(clinic_id_int)
+                if not clinic:
+                    continue
+
+                if existing:
+                    existing.no_coverage_needed = True
+                    existing.no_coverage_reason = no_cov_reason
+                    existing.covering_physician = None
+                    existing.clinic = clinic
+                    existing.hours = None
+                    existing.hourly_rate_override = None
+                    existing.save()
+                else:
+                    CoverageAssignment.objects.create(
+                        clinic=clinic,
+                        covering_physician=None,
+                        covered_physician=req.physician,
+                        date=day,
+                        hours=None,
+                        no_coverage_needed=True,
+                        no_coverage_reason=no_cov_reason,
+                        notes=f'No coverage needed for time off: {req.start_date} – {req.end_date}',
+                    )
+                saved += 1
+                continue
+
+            
+
+
 
             if locum_id and not clinic_id:
                 errors.append(f'{day.strftime("%b %d")}: A locum is selected but no clinic is assigned.')
@@ -979,6 +1071,8 @@ def assign_locum_to_time_off(request, pk):
                 existing.covering_physician = locum
                 existing.clinic = clinic
                 existing.hours = hours_value
+                existing.no_coverage_needed = False                     # ← NEW
+                existing.no_coverage_reason = '' 
                 existing.save()
                 saved += 1
             else:
@@ -1085,7 +1179,7 @@ def psa_coverage_request_view(request):
     for p in physicians:
         # Days where a locum actually covered this PSA physician
         assignments = CoverageAssignment.objects.filter(
-            covered_physician=p, date__year=year,
+            covered_physician=p, date__year=year, no_coverage_needed=False,
         ).select_related('covering_physician', 'clinic').order_by('date')
 
 
