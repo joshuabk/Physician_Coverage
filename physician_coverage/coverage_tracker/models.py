@@ -155,7 +155,7 @@ class Clinic(models.Model):
         'Physician',
         blank=True,
         related_name='assigned_clinics',
-        limit_choices_to={'physician_type__in': ['regualr', 'psa']},
+        limit_choices_to={'physician_type__in': ['regular', 'psa']},
         help_text= "NROC and PSA physicians permanently assigned to this clinic"
     )
     is_active = models.BooleanField(default=True)
