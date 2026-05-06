@@ -20,7 +20,7 @@ from .decorators import login_required_custom, admin_required, can_approve_requi
 
 #admin pass:northside1  user: superuser
 
-#physician  pass: doctor1,  user: doc
+#physician  pass: nroc_doctor1,  user: nroc_doc
 
 #physician  pass: psa_doctor1,  user: psa_doc
 
