@@ -14,6 +14,21 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.db import IntegrityError
 from django.core.exceptions import ValidationError
 
+
+#admin    user: superuser, pass:northside1  
+
+#physician   user: nroc_doc, pass: nroc_doctor1  
+
+#physician   user: psa_doc,  pass: psa_doctor1 
+
+#physician_admin  user: nroc_admin,  pass: nroc_doc1  
+
+#physician_admin  user: psa_admin,  pass: psa_doc1,  
+
+#nursing          user: nursing     pass: northside1 
+
+
+
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
     CoverageRequest, UserProfile, OnCallSchedule,
