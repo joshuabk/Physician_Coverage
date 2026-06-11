@@ -1,0 +1,142 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+
+<div style="max-width: 560px;">
+  <div class="page-header">
+    <h1>{{ title }}</h1>
+    <a href="{% url back_url %}" class="btn btn-ghost">← Back</a>
+  </div>
+
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+      {% for field in form %}
+        <div class="form-group">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+
+          {# Live "weekend of …" preview, shown right under the date field #}
+          {% if field.name == 'weekend_start_date' %}
+            <div id="weekend-preview"
+                 style="margin-top:6px;font-size:12.5px;color:var(--teal);min-height:18px;"></div>
+            <div style="color:var(--text-3); font-size:12px; margin-top:3px;">
+              Pick any Saturday — the assignment covers that Sat + Sun as one weekend.
+            </div>
+          {% endif %}
+
+          {% if field.errors %}
+            {% for err in field.errors %}
+              <div style="color:var(--red); font-size:12px; margin-top:4px;">{{ err }}</div>
+            {% endfor %}
+          {% endif %}
+          {% if field.help_text and field.name != 'weekend_start_date' %}
+            <div style="color:var(--text-3); font-size:12px; margin-top:3px;">{{ field.help_text }}</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      {% if form.non_field_errors %}
+        {% for err in form.non_field_errors %}
+          <div style="color:var(--red); font-size:13px; margin-bottom:12px; padding:8px 12px; background:rgba(224,84,84,0.1); border-radius:6px;">
+            {{ err }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="flex gap-2" style="margin-top:1.25rem;">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="{% url back_url %}" class="btn btn-ghost">Cancel</a>
+        {% if entry %}
+          <a href="/on-call/{{ entry.pk }}/delete/"
+             class="btn btn-danger"
+             style="margin-left:auto;"
+             onclick="return confirm('Permanently delete this weekend on-call?')">Delete</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ── 1) Filter the Physician <select> options to match the selected Group ──
+  var groupSelect = document.getElementById('id_oncall_group');
+  var physSelect  = document.getElementById('id_oncall_physician');
+
+  if (groupSelect && physSelect) {
+    var allOptions = Array.prototype.slice.call(physSelect.options).map(function (opt) {
+      return { value: opt.value, text: opt.text };
+    });
+
+    function rebuildPhysicians() {
+      var group = groupSelect.value;
+      var matchTag = group === 'nroc' ? '(NROC)' : group === 'psa' ? '(PSA)' : null;
+      var current = physSelect.value;
+
+      physSelect.innerHTML = '';
+      allOptions.forEach(function (o) {
+        if (o.value === '' || matchTag === null || o.text.indexOf(matchTag) !== -1) {
+          var opt = document.createElement('option');
+          opt.value = o.value;
+          opt.text  = o.text;
+          if (o.value === current) opt.selected = true;
+          physSelect.appendChild(opt);
+        }
+      });
+    }
+    groupSelect.addEventListener('change', rebuildPhysicians);
+    rebuildPhysicians();
+  }
+
+  // ── 2) Saturday-snap + live "Weekend of …" preview ───────────────────────
+  var dateInput = document.getElementById('id_weekend_start_date');
+  var preview   = document.getElementById('weekend-preview');
+  if (!dateInput) return;
+
+  function formatDate(d) {
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+  }
+
+  function refresh() {
+    if (!dateInput.value) {
+      if (preview) preview.textContent = '';
+      return;
+    }
+    // Parse YYYY-MM-DD as a *local* date (avoid UTC drift)
+    var parts = dateInput.value.split('-');
+    var d = new Date(parseInt(parts[0], 10),
+                     parseInt(parts[1], 10) - 1,
+                     parseInt(parts[2], 10));
+
+    // JS: Sunday=0, Saturday=6
+    if (d.getDay() !== 6) {
+      // Auto-snap to a Saturday. Sunday belongs to the previous weekend's
+      // Saturday (one day back). Mon–Fri also roll back to that week's Sat.
+      var dayOfWeek = d.getDay();
+      var offsetToSat = dayOfWeek === 0
+        ? -1                          // Sunday → previous Saturday
+        : -(dayOfWeek + 1);           // Mon..Fri → previous Saturday
+      d.setDate(d.getDate() + offsetToSat);
+
+      var yyyy = d.getFullYear();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      dateInput.value = yyyy + '-' + mm + '-' + dd;
+    }
+
+    var sat = d;
+    var sun = new Date(d);
+    sun.setDate(sun.getDate() + 1);
+    if (preview) {
+      preview.textContent = 'Weekend of ' + formatDate(sat) + ' – ' + formatDate(sun);
+    }
+  }
+
+  dateInput.addEventListener('change', refresh);
+  refresh();  // on page load too
+})();
+</script>
+
+{% endblock %}

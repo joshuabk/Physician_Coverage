@@ -109,8 +109,12 @@
                 <a href="/time-off/{{ req.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
                 {% endif %}
                 {% if req.status == 'pending' %}
-                  <a href="/time-off/{{ req.pk }}/approve/" class="btn btn-success btn-sm">Approve</a>
-                  <a href="/time-off/{{ req.pk }}/deny/" class="btn btn-danger btn-sm">Deny</a>
+                  <form method="post" action="/time-off/{{ req.pk }}/approve/" style="display:inline;">{% csrf_token %}
+                    <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                  </form>
+                  <form method="post" action="/time-off/{{ req.pk }}/deny/" style="display:inline;">{% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm">Deny</button>
+                  </form>
                 {% endif %}
                 {% if req.status == 'approved' and is_admin%}
                   <a href="/time-off/{{ req.pk }}/assign-locum/" class="btn btn-ghost btn-sm" title="Edit coverage">
@@ -118,17 +122,19 @@
                   </a>
                 {% endif %}
                 {% if req.status == 'pending' and is_admin or req.status == 'approved' and is_admin %}
-                  <a href="/time-off/{{ req.pk }}/cancel/"
-                     class="btn btn-danger btn-sm"
-                     onclick="return confirm('Cancel this time off request?')">Cancel</a>
+                  <form method="post" action="/time-off/{{ req.pk }}/cancel/" style="display:inline;"
+                        onsubmit="return confirm('Cancel this time off request?')">{% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+                  </form>
                 {% endif %}
               {% else %}
                 {# Physician: can only cancel their own pending requests #}
                 {% if req.status == 'pending' %}
                   <span class="badge badge-pending" style="margin-right:4px;">Awaiting approval</span>
-                  <a href="/time-off/{{ req.pk }}/cancel/"
-                     class="btn btn-danger btn-sm"
-                     onclick="return confirm('Cancel this request?')">Cancel</a> 
+                  <form method="post" action="/time-off/{{ req.pk }}/cancel/" style="display:inline;"
+                        onsubmit="return confirm('Cancel this request?')">{% csrf_token %}
+                    <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+                  </form> 
                 {% elif req.status == 'approved' %}
                   <span style="font-size:12px;color:var(--green);">✓ Approved</span>
                 {% elif req.status == 'denied' %}

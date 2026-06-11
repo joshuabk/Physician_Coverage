@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment,
-    PhysicianAvailability, CoverageRequest, UserProfile
+    PhysicianAvailability, CoverageRequest, UserProfile, OnCallSchedule
 )
 
 
@@ -102,3 +102,12 @@ class CoverageRequestAdmin(admin.ModelAdmin):
     list_display = ['physician', 'requested_date', 'status', 'created_at']
     list_filter = ['status', 'physician']
     ordering = ['-requested_date']
+
+# Appended at the end:
+@admin.register(OnCallSchedule)
+class OnCallScheduleAdmin(admin.ModelAdmin):
+    list_display = ['weekend_start_date', 'group', 'physician', 'notes']
+    list_filter = ['group']
+    search_fields = ['physician__first_name', 'physician__last_name']
+    date_hierarchy = 'weekend_start_date'
+    ordering = ['-weekend_start_date', 'group']

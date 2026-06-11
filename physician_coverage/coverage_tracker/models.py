@@ -32,18 +32,26 @@ def get_holidays(year):
     return sorted(holidays)
 
 
-HOLIDAYS = {
-    (1, 1),   # New Year's Day
-    (5, 25),  # Memorial Day
-    (7, 4),   # Independence Day
-    (9, 7),   # Labor Day
-    (11, 26), # Thanksgiving
-    (12, 25), # Christmas
-}
+def get_extra_workdays(year):
+    """Weekend days that should be treated as workdays (schedulable)."""
+    extra = set()
+    # Sunday before Thanksgiving
+    nov_cal = calendar.monthcalendar(year, 11)
+    thursdays = [week[3] for week in nov_cal if week[3] != 0]
+    fourth_thursday = thursdays[3]
+    thanksgiving = date(year, 11, fourth_thursday)
+    sunday_before = thanksgiving - datetime.timedelta(days=4)  # Thu - 4 = Sun
+    extra.add(sunday_before)
+    return extra
 
-def check_holiday(day):
-    is_holiday = (day.month, day.day) in HOLIDAYS
-    return is_holiday
+
+def is_workday(d, holidays=None, extra_workdays=None):
+    """Return True if d is a schedulable workday (Mon-Fri, or an extra workday, minus holidays)."""
+    if holidays and d in holidays:
+        return False
+    if extra_workdays and d in extra_workdays:
+        return True
+    return d.weekday() < 5
 
 class Physician(models.Model):
     PHYSICIAN_TYPE_CHOICES = [
@@ -95,11 +103,12 @@ class Physician(models.Model):
         return self.physician_type == 'psa'
 
     def days_taken(self, year=None):
+        """Approved time off charged in BUSINESS days (matches TimeOffRequest.duration_days)."""
         if year is None:
             year = timezone.now().year
         total = 0
         for req in TimeOffRequest.objects.filter(physician=self, status='approved', start_date__year=year):
-            total += (req.end_date - req.start_date).days + 1
+            total += req.duration_days
         return total
 
     def days_remaining(self, year=None):
@@ -110,7 +119,7 @@ class Physician(models.Model):
             year = timezone.now().year
         total = 0
         for req in TimeOffRequest.objects.filter(physician=self, status='pending', start_date__year=year):
-            total += (req.end_date - req.start_date).days + 1
+            total += req.duration_days
         return total
 
     def total_coverage_days(self, year=None):
@@ -136,7 +145,7 @@ class Physician(models.Model):
         total = Decimal('0.00')
         for a in assignments:
             rate = a.hourly_rate_override if a.hourly_rate_override is not None else self.hourly_rate
-            if rate is None:
+            if rate is None or a.hours is None:
                 continue
             total += (rate * a.hours)
         return total.quantize(Decimal('0.01'))
@@ -198,17 +207,29 @@ class TimeOffRequest(models.Model):
     def __str__(self):
         return f"{self.physician} — {self.start_date} to {self.end_date}"
 
+    def workdays(self):
+        """Every business day in the request, as a list of dates.
+
+        Handles requests that span a year boundary (holidays are computed for
+        every year in the range) and honors extra workdays (e.g. the Sunday
+        before Thanksgiving) so duration matches the coverage views exactly.
+        """
+        holidays = set()
+        extra = set()
+        for y in range(self.start_date.year, self.end_date.year + 1):
+            holidays |= set(get_holidays(y))
+            extra |= get_extra_workdays(y)
+        days = []
+        current = self.start_date
+        while current <= self.end_date:
+            if is_workday(current, holidays, extra):
+                days.append(current)
+            current += datetime.timedelta(days=1)
+        return days
+
     @property
     def duration_days(self):
-        total = 0
-        current = self.start_date
-        year = self.start_date.year
-        holidays = get_holidays(year)
-        while current <= self.end_date:
-            if current.weekday() < 5 and not current in holidays:  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
-                total += 1
-            current += datetime.timedelta(days=1)
-        return total
+        return len(self.workdays())
 
 class CoverageAssignment(models.Model):
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='coverage_assignments')
@@ -341,6 +362,100 @@ class CoverageRequest(models.Model):
 
     def __str__(self):
         return f"{self.physician} — {self.requested_date} ({self.status})"
+class OnCallSchedule(models.Model):
+    """Weekend on-call schedule entries for NROC and PSA physicians.
+
+    Each row represents one full weekend (Saturday + Sunday) of on-call
+    coverage for one physician in one group. The weekend is uniquely
+    identified by its Saturday date (`weekend_start_date`).
+
+    A physician can be on call for at most one weekend per (group, weekend)
+    combination, but two physicians from different groups CAN cover the
+    same weekend (one NROC + one PSA).
+    """
+    GROUP_CHOICES = [
+        ('nroc', 'NROC'),
+        ('psa', 'PSA'),
+    ]
+
+    group = models.CharField(
+        max_length=10, choices=GROUP_CHOICES,
+        help_text="Which physician group this on-call entry belongs to."
+    )
+    physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='on_call_entries',
+        limit_choices_to={'physician_type__in': ['regular', 'psa']},
+        help_text="Physician scheduled to be on call this weekend."
+    )
+    weekend_start_date = models.DateField(
+        help_text="Saturday that starts the weekend (Sunday is implied)."
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['weekend_start_date', 'group']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['group', 'weekend_start_date', 'physician'],
+                name='unique_oncall_per_group_weekend_physician',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.get_group_display()} on-call — {self.physician} "
+            f"weekend of {self.weekend_start_date:%b %d, %Y}"
+        )
+
+    @property
+    def saturday(self):
+        return self.weekend_start_date
+
+    @property
+    def sunday(self):
+        return self.weekend_start_date + datetime.timedelta(days=1)
+
+    @property
+    def weekend_label(self):
+        sat = self.saturday
+        sun = self.sunday
+        # Format the day-of-month manually so it works on Windows too
+        # (Windows strftime has no portable "no zero-pad" code).
+        sat_month = sat.strftime("%b")
+        sun_month = sun.strftime("%b")
+        if sat.month == sun.month:
+            # "Jun 7–8, 2026"
+            return f"{sat_month} {sat.day}–{sun.day}, {sat.year}"
+        # "Jun 30 – Jul 1, 2026"
+        return f"{sat_month} {sat.day} – {sun_month} {sun.day}, {sat.year}"
+
+    def clean(self):
+        """Validate physician/group match and that the date is a Saturday."""
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+
+        if self.weekend_start_date is not None:
+            # Python's weekday(): Monday=0 .. Saturday=5, Sunday=6
+            if self.weekend_start_date.weekday() != 5:
+                errors['weekend_start_date'] = (
+                    "Weekend on-call must start on a Saturday."
+                )
+
+        if self.physician_id and self.group:
+            if self.group == 'nroc' and not self.physician.is_regular:
+                errors['physician'] = (
+                    'NROC on-call entries must reference an NROC physician.'
+                )
+            elif self.group == 'psa' and not self.physician.is_psa:
+                errors['physician'] = (
+                    'PSA on-call entries must reference a PSA physician.'
+                )
+
+        if errors:
+            raise ValidationError(errors)
 
 
 class UserProfile(models.Model):
@@ -355,6 +470,7 @@ class UserProfile(models.Model):
         ('admin', 'Administrator'),
         ('physician_admin', 'Physician Administrator'),
         ('physician', 'Physician'),
+        ('nursing', 'Nursing'),
     ]
     SCOPE_CHOICES = [
         ('nroc', 'NROC Physicians'),
@@ -384,6 +500,11 @@ class UserProfile(models.Model):
     @property
     def is_physician(self):
         return self.role == 'physician'
+    
+    @property
+    def is_nursing(self):
+        """Nursing logins are restricted to the Clinics page only."""
+        return self.role == 'nursing'
     
     @property
     def can_approve_time_off(self):

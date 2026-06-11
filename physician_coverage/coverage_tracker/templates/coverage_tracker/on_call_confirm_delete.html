@@ -1,0 +1,36 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Remove Weekend On-Call{% endblock %}
+{% block content %}
+
+<div style="max-width: 560px;">
+  <div class="page-header">
+    <h1>Remove Weekend On-Call</h1>
+    <a href="/on-call/" class="btn btn-ghost">← Back</a>
+  </div>
+
+  <div class="card">
+    <p style="margin-bottom:1rem;">Are you sure you want to remove this weekend on-call assignment?</p>
+
+    <div style="background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1.25rem;">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Assignment</div>
+      <div style="font-weight:500;">{{ entry.physician }}</div>
+      <div class="text-muted text-sm">
+        {{ entry.get_group_display }} ·
+        Weekend of {{ entry.saturday|date:"l, M j" }} – {{ entry.sunday|date:"l, M j, Y" }}
+      </div>
+      {% if entry.notes %}
+        <div class="text-muted text-sm mt-1">{{ entry.notes }}</div>
+      {% endif %}
+    </div>
+
+    <form method="post">
+      {% csrf_token %}
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-danger">Yes, remove it</button>
+        <a href="/on-call/" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

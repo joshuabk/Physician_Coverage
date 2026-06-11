@@ -226,8 +226,12 @@
             <td>{{ req.duration_days }}</td>
             <td>
               <div class="flex gap-2">
-                <a href="/time-off/{{ req.pk }}/approve/" class="btn btn-success btn-sm">✓ Approve</a>
-                <a href="/time-off/{{ req.pk }}/deny/" class="btn btn-danger btn-sm">✗</a>
+                <form method="post" action="/time-off/{{ req.pk }}/approve/" style="display:inline;">{% csrf_token %}
+                  <button type="submit" class="btn btn-success btn-sm">✓ Approve</button>
+                </form>
+                <form method="post" action="/time-off/{{ req.pk }}/deny/" style="display:inline;">{% csrf_token %}
+                  <button type="submit" class="btn btn-danger btn-sm">✗</button>
+                </form>
               </div>
             </td>
           </tr>

@@ -1,0 +1,163 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Weekend On-Call Schedule{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>Weekend On-Call Schedule</h1>
+    <p class="text-muted text-sm mt-1">
+      Showing weekends from {{ start_date|date:"M j, Y" }} – {{ end_date|date:"M j, Y" }}
+    </p>
+  </div>
+  <div class="flex gap-2">
+    {% if is_admin %}
+      <a href="/on-call/add/?group=nroc" class="btn btn-ghost">+ NROC Weekend</a>
+      <a href="/on-call/add/?group=psa" class="btn btn-ghost">+ PSA Weekend</a>
+      <a href="/on-call/add/" class="btn btn-primary">+ New Entry</a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Group tabs -->
+<div class="type-tabs">
+  <a href="?group=all&start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+     class="type-tab {% if group_filter == 'all' %}active{% endif %}">Both Groups</a>
+  <a href="?group=nroc&start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+     class="type-tab {% if group_filter == 'nroc' %}active{% endif %}">NROC</a>
+  <a href="?group=psa&start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}"
+     class="type-tab {% if group_filter == 'psa' %}active{% endif %}">PSA</a>
+</div>
+
+<!-- Date range filter -->
+<form method="get" style="display:flex; gap:10px; margin-bottom:1.25rem; flex-wrap:wrap; align-items:flex-end;">
+  <input type="hidden" name="group" value="{{ group_filter }}">
+  <div>
+    <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">From</label>
+    <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="form-control" style="width:auto;">
+  </div>
+  <div>
+    <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">To</label>
+    <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="form-control" style="width:auto;">
+  </div>
+  <button type="submit" class="btn btn-primary">Apply</button>
+  <a href="/on-call/?group={{ group_filter }}" class="btn btn-ghost">Reset</a>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Weekend</th>
+          {% if show_nroc %}<th>NROC On-Call</th>{% endif %}
+          {% if show_psa %}<th>PSA On-Call</th>{% endif %}
+          {% if is_admin %}<th style="text-align:right;">Actions</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in weekend_rows %}
+        <tr {% if row.saturday == current_weekend_saturday %}style="background:rgba(0,184,169,0.06);"{% endif %}>
+          <td style="font-family:'DM Mono',monospace;font-weight:500;white-space:nowrap;">
+            {{ row.saturday|date:"M j" }} – {{ row.sunday|date:"M j, Y" }}
+            <div style="font-size:11px;color:var(--text-3);font-family:'DM Sans',sans-serif;font-weight:400;margin-top:2px;">
+              Sat – Sun
+            </div>
+            {% if row.saturday == current_weekend_saturday %}
+              <span class="badge" style="background:rgba(0,184,169,0.2);color:var(--teal);margin-top:4px;display:inline-block;">This weekend</span>
+            {% endif %}
+          </td>
+
+          {% if show_nroc %}
+          <td>
+            {% if row.nroc %}
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                {% for e in row.nroc %}
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <div class="avatar avatar-regular" style="width:24px;height:24px;font-size:10px;">
+                      {{ e.physician.first_name.0 }}{{ e.physician.last_name.0 }}
+                    </div>
+                    <div>
+                      <div style="font-weight:500;color:var(--text);">
+                        Dr. {{ e.physician.first_name }} {{ e.physician.last_name }}
+                      </div>
+                      {% if e.notes %}
+                      <div style="font-size:11px;color:var(--text-3);">{{ e.notes }}</div>
+                      {% endif %}
+                    </div>
+                    {% if is_admin %}
+                    <div style="margin-left:auto;display:flex;gap:4px;">
+                      <a href="/on-call/{{ e.pk }}/edit/" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;">Edit</a>
+                      <a href="/on-call/{{ e.pk }}/delete/" class="btn btn-danger btn-sm"
+                         style="padding:2px 8px;font-size:11px;"
+                         onclick="return confirm('Remove this weekend on-call?')">×</a>
+                    </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="empty-state" style="padding:0;font-style:italic;font-size:12.5px;">— unassigned —</span>
+            {% endif %}
+          </td>
+          {% endif %}
+
+          {% if show_psa %}
+          <td>
+            {% if row.psa %}
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                {% for e in row.psa %}
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <div class="avatar avatar-psa" style="width:24px;height:24px;font-size:10px;">
+                      {{ e.physician.first_name.0 }}{{ e.physician.last_name.0 }}
+                    </div>
+                    <div>
+                      <div style="font-weight:500;color:var(--text);">
+                        Dr. {{ e.physician.first_name }} {{ e.physician.last_name }}
+                      </div>
+                      {% if e.notes %}
+                      <div style="font-size:11px;color:var(--text-3);">{{ e.notes }}</div>
+                      {% endif %}
+                    </div>
+                    {% if is_admin %}
+                    <div style="margin-left:auto;display:flex;gap:4px;">
+                      <a href="/on-call/{{ e.pk }}/edit/" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;">Edit</a>
+                      <a href="/on-call/{{ e.pk }}/delete/" class="btn btn-danger btn-sm"
+                         style="padding:2px 8px;font-size:11px;"
+                         onclick="return confirm('Remove this weekend on-call?')">×</a>
+                    </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="empty-state" style="padding:0;font-style:italic;font-size:12.5px;">— unassigned —</span>
+            {% endif %}
+          </td>
+          {% endif %}
+
+          {% if is_admin %}
+          <td style="text-align:right;white-space:nowrap;">
+            <td style="text-align:right;white-space:nowrap;">
+            <a href="/on-call/add/?group=nroc&weekend_start_date={{ row.saturday|date:'Y-m-d' }}"
+                class="btn btn-ghost btn-sm"
+                title="Add NROC on-call for the weekend of {{ row.saturday|date:'M j' }}">+ NROC</a>
+            <a href="/on-call/add/?group=psa&weekend_start_date={{ row.saturday|date:'Y-m-d' }}"
+                class="btn btn-ghost btn-sm"
+                title="Add PSA on-call for the weekend of {{ row.saturday|date:'M j' }}">+ PSA</a>
+                
+          </td>
+          {% endif %}
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="{% if is_admin %}4{% else %}3{% endif %}" style="text-align:center;padding:2rem;" class="empty-state">
+            No weekends in this range.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

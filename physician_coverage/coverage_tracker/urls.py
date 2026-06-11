@@ -48,4 +48,12 @@ urlpatterns = [
 
     # Account
     path('account/password/', views.change_password, name='change_password'),
+
+    # On-Call Schedule
+    # Viewing: open to all authenticated users (any physician role).
+    # Add/edit/delete: admin only (enforced in the views).
+    path('on-call/', views.on_call_schedule, name='on_call_schedule'),
+    path('on-call/add/', views.add_on_call, name='add_on_call'),
+    path('on-call/<int:pk>/edit/', views.edit_on_call, name='edit_on_call'),
+    path('on-call/<int:pk>/delete/', views.delete_on_call, name='delete_on_call'),
 ]

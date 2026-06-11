@@ -1,109 +1,82 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.db.models import Q, Sum, Count
+from django.http import JsonResponse
 from django.utils import timezone
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 import datetime
 import calendar
+import json
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
+from django.db import IntegrityError
+from django.core.exceptions import ValidationError
 
-from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability, CoverageRequest, UserProfile
+from .models import (
+    Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
+    CoverageRequest, UserProfile, OnCallSchedule,
+    get_holidays, get_extra_workdays, is_workday,
+)
 from .forms import (
     TimeOffRequestForm, CoverageAssignmentForm,
-    PhysicianAvailabilityForm, PhysicianForm, ClinicForm
+    PhysicianAvailabilityForm, PhysicianForm, ClinicForm, OnCallScheduleForm
 )
-from .decorators import login_required_custom, admin_required, can_approve_required
+
+from .decorators import login_required_custom, admin_required, can_approve_required, clinic_access_required
 
 
-#admin pass:northside1  user: superuser
-
-#physician  pass: nroc_doctor1,  user: nroc_doc
-
-#physician  pass: psa_doctor1,  user: psa_doc
-
-#physician_admin   pass: nroc_doc1,  user: nroc_admin
-
-#physician_admin   pass: psa_doc1,  user: psa_admin
+# Maps a UserProfile.scope value to the Physician.physician_type values it covers.
+SCOPE_TO_TYPE = {'nroc': ['regular'], 'psa': ['psa'], 'all': ['regular', 'psa']}
 
 
+def _int_param(request, name, default):
+    """Read an int query param, falling back to default on garbage input."""
+    try:
+        return int(request.GET.get(name, default))
+    except (TypeError, ValueError):
+        return default
 
-def get_holidays(year):
-    holidays = []
-    
-    # Fixed holidays
-    holidays.append(date(year, 1, 1))   # New Year's Day
-    holidays.append(date(year, 7, 4))   # Independence Day
-    holidays.append(date(year, 12, 25)) # Christmas Day
-    may_cal = calendar.monthcalendar(year, 5)
-    last_monday_may = [week[0] for week in may_cal if week[0] != 0][-1]
-    holidays.append(date(year, 5, last_monday_may))
-    
-    # Labor Day: First Monday in September
-    sep_cal = calendar.monthcalendar(year, 9)
-    first_monday_sep = next(week[0] for week in sep_cal if week[0] != 0)
-    holidays.append(date(year, 9, first_monday_sep))
-    
-    # Thanksgiving: 4th Thursday in November
-    nov_cal = calendar.monthcalendar(year, 11)
-    thursdays = [week[3] for week in nov_cal if week[3] != 0]  # Thursday index = 3
-    fourth_thursday = thursdays[3]
-    holidays.append(date(year, 11, fourth_thursday))
-    
-    return sorted(holidays)
 
-HOLIDAYS = {
-    (1, 1),   # New Year's Day
-    (5, 25),  # Memorial Day
-    (7, 4),   # Independence Day
-    (9, 7),   # Labor Day
-    (11, 26), # Thanksgiving
-    (12, 25), # Christmas
-}
-def check_holiday(day):
-    is_holiday = (day.month, day.day) in HOLIDAYS
-    return is_holiday
+def _scope_types(profile):
+    """Physician types this login may act on. Admins cover everything."""
+    if profile is None:
+        return []
+    if profile.is_admin:
+        return ['regular', 'psa']
+    return SCOPE_TO_TYPE.get(profile.scope, [])
 
-def get_extra_workdays(year):
-    """Weekend days that should be treated as workdays (schedulable)."""
-    extra = set()
-    # Sunday before Thanksgiving
-    nov_cal = calendar.monthcalendar(year, 11)
-    thursdays = [week[3] for week in nov_cal if week[3] != 0]
-    fourth_thursday = thursdays[3]
-    thanksgiving = date(year, 11, fourth_thursday)
-    sunday_before = thanksgiving - timedelta(days=4)  # Thu - 4 = Sun
-    extra.add(sunday_before)
-    return extra
 
-def is_workday(d, holidays=None, extra_workdays=None):
-    """Return True if d is a schedulable workday (Mon-Fri, or an extra workday, minus holidays)."""
-    if holidays and d in holidays:
+def _can_modify_time_off(profile, req):
+    """Who may edit/cancel a time-off request.
+
+    - Full admins: any request.
+    - Approvers (physician administrators): any request for a physician in their scope.
+    - Everyone else: only PENDING requests for physicians in their scope.
+    """
+    if profile is None:
         return False
-    if extra_workdays and d in extra_workdays:
+    if profile.is_admin:
         return True
-    return d.weekday() < 5
-
-
+    if req.physician.physician_type not in _scope_types(profile):
+        return False
+    if profile.can_approve_time_off:
+        return True
+    return req.status == 'pending'
 
 
 @admin_required
 def dashboard(request):
     today = date.today()
-    year = int(request.GET.get('year', today.year))
+    year = _int_param(request, 'year', today.year)
 
     regular_physicians = Physician.objects.filter(is_active=True, physician_type='regular')
     locum_physicians = Physician.objects.filter(is_active=True, physician_type='locum')
 
     todays_coverage = CoverageAssignment.objects.filter(
-        date=today, no_coverage_needed=False                              # ← added filter
+        date=today, no_coverage_needed=False
     ).select_related('clinic', 'covering_physician', 'covered_physician')
-    requests = TimeOffRequest.objects.filter(status='cancelled')
-    print(f" requests {requests}")
-    #for req in list(requests):
-        #req.delete()
 
     out_today = TimeOffRequest.objects.filter(
         status='approved', start_date__lte=today, end_date__gte=today
@@ -166,7 +139,7 @@ def dashboard(request):
 def physician_list(request):
     physician_type = request.GET.get('type', 'regular')
     sub_tab = request.GET.get('sub', 'list')  # 'list' or 'coverage_days' for PSA
-    year = int(request.GET.get('year', date.today().year))
+    year = _int_param(request, 'year', date.today().year)
     physicians = Physician.objects.filter(is_active=True, physician_type=physician_type)
 
     summaries = []
@@ -233,7 +206,7 @@ def physician_list(request):
 @admin_required
 def physician_detail(request, pk):
     physician = get_object_or_404(Physician, pk=pk)
-    year = int(request.GET.get('year', date.today().year))
+    year = _int_param(request, 'year', date.today().year)
     time_off_requests = TimeOffRequest.objects.filter(physician=physician).order_by('-start_date')
     coverage = CoverageAssignment.objects.filter(
         covering_physician=physician
@@ -349,7 +322,6 @@ def time_off_list(request):
     # physicians see all pending + approved requests across the team.
     viewer_scope = profile.scope if profile else 'nroc'
     # 'nroc' here maps to the DB value 'regular' on Physician.physician_type.
-    SCOPE_TO_TYPE = {'nroc': ['regular'], 'psa': ['psa'], 'all': ['regular', 'psa']}
 
     if is_admin:
         if status:
@@ -409,6 +381,78 @@ def time_off_list(request):
         'can_approve': can_approve,
     })
 
+def _on_call_weekends_for_physicians(physician_qs):
+    """Build a JSON-serializable dict of upcoming on-call weekends per physician.
+
+    Used by the time-off form's client-side warning: if a vacation ends on
+    the Friday before, or starts on the Monday after, one of the physician's
+    on-call weekends, the form pops a confirm() dialog before submitting.
+
+    Returns {physician_id (str): [saturday_iso, ...]}. Only weekends from
+    today onward are included — past weekends can't conflict with a new
+    request. Keys are strings because the <select> option values render as
+    strings in the rendered template, which keeps the JS lookup trivial.
+    """
+    today = timezone.now().date()
+    entries = OnCallSchedule.objects.filter(
+        physician__in=physician_qs,
+        weekend_start_date__gte=today,
+    ).values_list('physician_id', 'weekend_start_date')
+
+    result = {}
+    for pid, sat in entries:
+        result.setdefault(str(pid), []).append(sat.isoformat())
+    return result
+
+def _oncall_conflicts_for_request(physician, start_date, end_date):
+    """Detect on-call duty that collides with a proposed time-off window.
+
+    Flags an on-call day that lands on:
+      * the day BEFORE the time off begins,
+      * the day AFTER the time off ends, or
+      * any day DURING the time off (start_date .. end_date inclusive).
+
+    Each OnCallSchedule row covers a full weekend — the Saturday
+    (`weekend_start_date`) plus the following Sunday — so every entry
+    contributes two candidate on-call days. A weekend conflicts when either
+    of those days falls inside the window [start_date - 1, end_date + 1].
+
+    Returns a list of human-readable warning strings (empty when there is
+    no conflict), suitable for showing in a click-through warning box.
+    """
+    if not (physician and start_date and end_date):
+        return []
+
+    window_start = start_date - timedelta(days=1)
+    window_end = end_date + timedelta(days=1)
+
+    # Filter generously by Saturday date (one extra day on the low side so a
+    # Saturday sitting just before the window can still contribute its
+    # Sunday), then classify each candidate day precisely below.
+    entries = OnCallSchedule.objects.filter(
+        physician=physician,
+        weekend_start_date__gte=window_start - timedelta(days=1),
+        weekend_start_date__lte=window_end,
+    ).order_by('weekend_start_date')
+
+    warnings = []
+    for entry in entries:
+        for on_call_day in (entry.saturday, entry.sunday):
+            if on_call_day < window_start or on_call_day > window_end:
+                continue
+            if on_call_day < start_date:
+                relation = 'the day before the time off begins'
+            elif on_call_day > end_date:
+                relation = 'the day after the time off ends'
+            else:
+                relation = 'during the time off'
+            warnings.append(
+                f"{physician} is on call ({entry.get_group_display()}) on "
+                f"{on_call_day:%a, %b %d, %Y} — {relation} "
+                f"(on-call weekend of {entry.weekend_label})."
+            )
+    return warnings
+
 
 @login_required_custom
 def add_time_off(request):
@@ -417,7 +461,6 @@ def add_time_off(request):
     viewer_scope = profile.scope if profile else 'nroc'
 
     # Which physician types may this login submit for?
-    SCOPE_TO_TYPE = {'nroc': ['regular'], 'psa': ['psa'], 'all': ['regular', 'psa']}
     allowed_types = SCOPE_TO_TYPE.get(viewer_scope, ['regular', 'psa']) if not is_admin else ['regular', 'psa']
 
     def restrict_queryset(form):
@@ -436,6 +479,21 @@ def add_time_off(request):
             if not is_admin and req.physician.physician_type not in allowed_types:
                 messages.error(request, 'You can only submit time off for physicians in your group.')
                 return redirect('time_off_list')
+            
+            acknowledged = request.POST.get('acknowledge_oncall') == '1'
+            oncall_warnings = _oncall_conflicts_for_request(
+                req.physician, req.start_date, req.end_date
+            )
+
+            if oncall_warnings and not acknowledged:
+                return render(request, 'coverage_tracker/form_page.html', {
+                    'form': form, 'title': 'Request Time Off', 'back_url': 'time_off_list',
+                    'on_call_weekends_by_physician': _on_call_weekends_for_physicians(
+                        form.fields['physician'].queryset
+                    ),
+                    'oncall_warnings': oncall_warnings,
+                })
+            
             req.status = 'pending'
             req.save()
             messages.success(request, 'Time off request submitted.')
@@ -451,6 +509,9 @@ def add_time_off(request):
 
     return render(request, 'coverage_tracker/form_page.html', {
         'form': form, 'title': 'Request Time Off', 'back_url': 'time_off_list',
+        'on_call_weekends_by_physician': _on_call_weekends_for_physicians(
+            form.fields['physician'].queryset
+        ),
     })
 
 
@@ -469,48 +530,97 @@ def _remove_coverage_for_request(req):
 @login_required_custom
 def edit_time_off(request, pk):
     req = get_object_or_404(TimeOffRequest, pk=pk)
+    profile = getattr(request.user, 'profile', None)
+
+    # Permission: admins anything; approvers anything in scope;
+    # everyone else only pending requests in their scope.
+    if not _can_modify_time_off(profile, req):
+        messages.error(request, 'You do not have permission to edit that request.')
+        return redirect('time_off_list')
+
+    can_set_status = bool(profile and profile.can_approve_time_off)
     old_status = req.status
+
+    def prepare(form):
+        """Only approvers may change status; everyone else gets the field removed."""
+        if not can_set_status:
+            form.fields.pop('status', None)
+        return form
+
     if request.method == 'POST':
-        form = TimeOffRequestForm(request.POST, instance=req)
+        form = prepare(TimeOffRequestForm(request.POST, instance=req))
         if form.is_valid():
+            # On-call conflict check (skip for requests being cancelled/denied,
+            # where an on-call collision no longer matters). Show a warning the
+            # user can click through by re-submitting with acknowledgement.
+            candidate = form.save(commit=False)
+            acknowledged = request.POST.get('acknowledge_oncall') == '1'
+            oncall_warnings = []
+            if candidate.status not in ('cancelled', 'denied'):
+                oncall_warnings = _oncall_conflicts_for_request(
+                    candidate.physician, candidate.start_date, candidate.end_date
+                )
+            if oncall_warnings and not acknowledged:
+                return render(request, 'coverage_tracker/form_page.html', {
+                    'form': form, 'title': 'Edit Time Off Request', 'back_url': 'time_off_list',
+                    'on_call_weekends_by_physician': _on_call_weekends_for_physicians(
+                        form.fields['physician'].queryset
+                    ),
+                    'oncall_warnings': oncall_warnings,
+                })
             updated = form.save()
-            # If status changed TO cancelled, remove all coverage assignments
-            if updated.status == 'cancelled' and old_status != 'cancelled':
+            # If status changed TO cancelled or denied, remove coverage assignments
+            if updated.status in ('cancelled', 'denied') and old_status not in ('cancelled', 'denied'):
                 removed = _remove_coverage_for_request(updated)
                 if removed:
                     messages.warning(
                         request,
-                        f'Request cancelled. {removed} locum coverage assignment{"s" if removed != 1 else ""} removed.'
+                        f'Request {updated.status}. {removed} locum coverage assignment{"s" if removed != 1 else ""} removed.'
                     )
                 else:
-                    messages.success(request, 'Request cancelled.')
+                    messages.success(request, f'Request {updated.status}.')
             else:
                 messages.success(request, 'Request updated.')
             return redirect('time_off_list')
     else:
-        form = TimeOffRequestForm(instance=req)
+        form = prepare(TimeOffRequestForm(instance=req))
     return render(request, 'coverage_tracker/form_page.html', {
-        'form': form, 'title': 'Edit Time Off Request', 'back_url': 'time_off_list'
+        'form': form, 'title': 'Edit Time Off Request', 'back_url': 'time_off_list',
+        'on_call_weekends_by_physician': _on_call_weekends_for_physicians(
+            form.fields['physician'].queryset
+        ),
     })
 
 
 @login_required_custom
 def cancel_time_off(request, pk):
-    """One-click cancellation: removes coverage assignments and sets status to cancelled."""
+    """One-click cancellation: removes coverage assignments and sets status to cancelled.
+
+    POST-only (state-changing). The request row is KEPT with status='cancelled'
+    so history and the audit trail survive — it is never deleted here.
+    """
     req = get_object_or_404(TimeOffRequest, pk=pk)
+
+    if request.method != 'POST':
+        return redirect('time_off_list')
+
+    profile = getattr(request.user, 'profile', None)
+    if not _can_modify_time_off(profile, req):
+        messages.error(request, 'You do not have permission to cancel that request.')
+        return redirect('time_off_list')
+
     if req.status == 'cancelled':
         messages.info(request, 'Request is already cancelled.')
         return redirect('time_off_list')
 
     removed = _remove_coverage_for_request(req)
     req.status = 'cancelled'
-    p_name = req.physician
-    req.delete()
+    req.save()
 
     if removed:
         messages.warning(
             request,
-            f'Time off for {p_name} cancelled. '
+            f'Time off for {req.physician} cancelled. '
             f'{removed} locum coverage assignment{"s" if removed != 1 else ""} removed.'
         )
     else:
@@ -520,7 +630,13 @@ def cancel_time_off(request, pk):
 
 @can_approve_required
 def approve_time_off(request, pk):
+    if request.method != 'POST':
+        return redirect('time_off_list')
     req = get_object_or_404(TimeOffRequest, pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
+        messages.error(request, 'You can only approve requests for physicians in your group.')
+        return redirect('time_off_list')
     req.status = 'approved'
     req.save()
     messages.success(request, f'Approved time off for {req.physician}.')
@@ -529,14 +645,20 @@ def approve_time_off(request, pk):
 
 @can_approve_required
 def deny_time_off(request, pk):
+    if request.method != 'POST':
+        return redirect('time_off_list')
     req = get_object_or_404(TimeOffRequest, pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
+        messages.error(request, 'You can only deny requests for physicians in your group.')
+        return redirect('time_off_list')
     req.status = 'denied'
     req.save()
     messages.warning(request, f'Denied time off for {req.physician}.')
     return redirect('time_off_list')
 
 
-@admin_required
+@clinic_access_required
 def clinic_list(request):
     selected_date = request.GET.get('date', str(date.today()))
     try:
@@ -633,6 +755,8 @@ def add_coverage(request):
 def delete_coverage(request, pk):
     assignment = get_object_or_404(CoverageAssignment, pk=pk)
     date_str = str(assignment.date)
+    if request.method != 'POST':
+        return redirect(f'/clinics/?date={date_str}')
     assignment.delete()
     messages.success(request, 'Coverage assignment removed.')
     return redirect(f'/clinics/?date={date_str}')
@@ -640,15 +764,15 @@ def delete_coverage(request, pk):
 
 @admin_required
 def locum_costs(request):
-    year = int(request.GET.get('year', date.today().year))
-    month = request.GET.get('month', '')
+    year = _int_param(request, 'year', date.today().year)
+    month = _int_param(request, 'month', 0)  # 0 = no month filter
 
     assignments = CoverageAssignment.objects.filter(
         date__year=year, no_coverage_needed=False
     ).select_related('covering_physician', 'clinic', 'covered_physician')
 
     if month:
-        assignments = assignments.filter(date__month=int(month))
+        assignments = assignments.filter(date__month=month)
 
     assignments = assignments.order_by('date', 'clinic')
     #for a in list(assignments):
@@ -663,7 +787,7 @@ def locum_costs(request):
 
     for p in locums:
         yr_assignments = [a for a in assignments if a.covering_physician_id == p.id]
-        hours = sum((a.hours for a in yr_assignments), Decimal('0.00'))
+        hours = sum(((a.hours or Decimal('0.00')) for a in yr_assignments), Decimal('0.00'))
         cost = sum(a.cost for a in yr_assignments)
         grand_total += cost
         grand_hours += hours
@@ -683,7 +807,7 @@ def locum_costs(request):
         m = a.date.month
         if m not in monthly_totals:
             monthly_totals[m] = {'hours': 0, 'cost': Decimal('0.00')}
-        monthly_totals[m]['hours'] += a.hours
+        monthly_totals[m]['hours'] += (a.hours or Decimal('0.00'))
         monthly_totals[m]['cost'] += a.cost
 
     months = []
@@ -796,50 +920,47 @@ def availability_view(request):
 @admin_required
 def update_availability(request):
     """AJAX endpoint: set a physician's availability for a specific date."""
-    import json
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            physician_id = data.get('physician_id')
-            date_str = data.get('date')
-            status = data.get('status')  # 'available', 'assigned', 'unavailable'
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required.'}, status=405)
 
-            physician = Physician.objects.get(pk=physician_id, is_active=True)
-            target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body.'}, status=400)
 
-            if status == 'assigned':
-                # Cannot assign via this endpoint; return error
-                from django.http import JsonResponse
-                return JsonResponse({'error': 'Use the coverage assignment form to assign coverage.'}, status=400)
+    status = data.get('status')  # 'available', 'assigned', 'unavailable'
+    if status == 'assigned':
+        # Cannot assign via this endpoint; return error
+        return JsonResponse({'error': 'Use the coverage assignment form to assign coverage.'}, status=400)
+    if status not in ('available', 'unavailable'):
+        return JsonResponse({'error': 'Invalid status.'}, status=400)
 
-            if status not in ('available', 'unavailable'):
-                return JsonResponse({'error': 'Invalid status.'}, status=400)
+    try:
+        physician = Physician.objects.get(pk=data.get('physician_id'), is_active=True)
+    except (Physician.DoesNotExist, ValueError, TypeError):
+        return JsonResponse({'error': 'Physician not found.'}, status=404)
 
+    try:
+        target_date = datetime.datetime.strptime(data.get('date') or '', '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date.'}, status=400)
 
-            removed = CoverageAssignment.objects.filter(
-                covering_physician=physician,
-                date=target_date,
-                ).delete()[0]
+    removed = CoverageAssignment.objects.filter(
+        covering_physician=physician,
+        date=target_date,
+    ).delete()[0]
 
-            is_available = (status == 'available')
-            PhysicianAvailability.objects.update_or_create(
-                    physician=physician,
-                    date=target_date,
-                    defaults={'is_available': is_available}
-                )
-            from django.http import JsonResponse
+    PhysicianAvailability.objects.update_or_create(
+        physician=physician,
+        date=target_date,
+        defaults={'is_available': (status == 'available')},
+    )
 
-            return JsonResponse({
-            'ok': True,
-            'status': status,
-            'assignments_removed': removed,
-        })
-        except Exception as e:
-            
-            return JsonResponse({'error': str(e)}, status=400)
-    
-        except Physician.DoesNotExist:
-            return JsonResponse({'error': 'Physician not found.'}, status=404)
+    return JsonResponse({
+        'ok': True,
+        'status': status,
+        'assignments_removed': removed,
+    })
 
 
 @admin_required
@@ -848,7 +969,7 @@ def approved_time_off_coverage(request):
     Shows all approved time-off requests with per-day locum coverage.
     """
     today = date.today()
-    year = int(request.GET.get('year', today.year))
+    year = _int_param(request, 'year', today.year)
 
     approved_requests = TimeOffRequest.objects.filter(
         status='approved',
@@ -866,15 +987,7 @@ def approved_time_off_coverage(request):
             ).select_related('covering_physician', 'clinic')
         }
 
-        all_dates = []
-        d = req.start_date
-        year = req.start_date.year
-        holidays = get_holidays(year)
-        while d <= req.end_date:
-            extra = get_extra_workdays(year)
-            if is_workday(d, set(holidays), extra):
-                all_dates.append(d)
-            d += timedelta(days=1)
+        all_dates = req.workdays()
 
         day_coverage = []
         uncovered_dates = []
@@ -945,15 +1058,8 @@ def assign_locum_to_time_off(request, pk):
     """
     req = get_object_or_404(TimeOffRequest, pk=pk, status='approved')
 
-    # Build full date list
-    all_dates = []
-    d = req.start_date
-    year = req.start_date.year
-    holidays = get_holidays(year)
-    while d <= req.end_date:
-        if d.weekday() < 5 and not d in holidays:
-            all_dates.append(d)
-        d += timedelta(days=1)
+    # Build full date list (business days, holiday- and cross-year-aware)
+    all_dates = req.workdays()
 
     # Existing assignments keyed by date
     existing_assignments = {
@@ -1139,6 +1245,8 @@ def edit_coverage_for_time_off(request, pk):
 @admin_required
 def delete_time_off_coverage_day(request, assignment_pk):
     """Delete a single day's coverage assignment, redirect back to coverage page."""
+    if request.method != 'POST':
+        return redirect('approved_time_off_coverage')
     assignment = get_object_or_404(CoverageAssignment, pk=assignment_pk)
     covered = assignment.covered_physician
     assignment.delete()
@@ -1173,7 +1281,7 @@ def mark_availability(request):
 
 @login_required_custom
 def psa_coverage_request_view(request):
-    year = int(request.GET.get('year', date.today().year))
+    year = _int_param(request, 'year', date.today().year)
     physicians = Physician.objects.filter(is_active=True, physician_type='psa').order_by('last_name', 'first_name')
     data = []
     for p in physicians:
@@ -1184,7 +1292,7 @@ def psa_coverage_request_view(request):
 
 
 
-        total_hours = sum((a.hours for a in assignments), Decimal('0.00'))
+        total_hours = sum(((a.hours or Decimal('0.00')) for a in assignments), Decimal('0.00'))
         total_cost = sum((a.cost for a in assignments), Decimal('0.00'))
 
         data.append({
@@ -1207,6 +1315,18 @@ def psa_coverage_request_view(request):
 def add_coverage_request(request):
     from django import forms as dj_forms
 
+    profile = getattr(request.user, 'profile', None)
+
+    # Only logins whose scope covers PSA physicians (or admins) may record
+    # PSA coverage requests.
+    if 'psa' not in _scope_types(profile):
+        messages.error(request, 'You do not have permission to record PSA coverage requests.')
+        return redirect('time_off_list')
+
+    # Only approvers (admins / physician administrators) may set a status;
+    # everyone else's submissions are always recorded as 'pending'.
+    can_set_status = bool(profile and profile.can_approve_time_off)
+
     class CoverageRequestForm(dj_forms.Form):
         physician = dj_forms.ModelChoiceField(
             queryset=Physician.objects.filter(is_active=True, physician_type='psa'),
@@ -1218,12 +1338,15 @@ def add_coverage_request(request):
 
     if request.method == 'POST':
         form = CoverageRequestForm(request.POST)
+        if not can_set_status:
+            form.fields.pop('status', None)
         if form.is_valid():
+            status = form.cleaned_data['status'] if can_set_status else 'pending'
             CoverageRequest.objects.update_or_create(
                 physician=form.cleaned_data['physician'],
                 requested_date=form.cleaned_data['requested_date'],
                 defaults={
-                    'status': form.cleaned_data['status'],
+                    'status': status,
                     'notes': form.cleaned_data.get('notes', ''),
                 }
             )
@@ -1231,6 +1354,8 @@ def add_coverage_request(request):
             return redirect('psa_coverage_request')
     else:
         form = CoverageRequestForm()
+        if not can_set_status:
+            form.fields.pop('status', None)
     return render(request, 'coverage_tracker/form_page.html', {
         'form': form,
         'title': 'Add PSA Coverage Request',
@@ -1241,6 +1366,12 @@ def add_coverage_request(request):
 @login_required_custom
 def delete_coverage_request(request, pk):
     req = get_object_or_404(CoverageRequest, pk=pk)
+    if request.method != 'POST':
+        return redirect('psa_coverage_request')
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and profile.can_approve_time_off and 'psa' in _scope_types(profile)):
+        messages.error(request, 'You do not have permission to delete coverage requests.')
+        return redirect('psa_coverage_request')
     req.delete()
     messages.success(request, 'Coverage request deleted.')
     return redirect('psa_coverage_request')
@@ -1255,6 +1386,10 @@ def _post_login_landing(user):
     profile = getattr(user, 'profile', None)
     if profile and profile.is_admin:
         return 'dashboard'
+    
+    if profile and profile.is_nursing:
+        return 'clinic_list'
+
     return 'time_off_list'
 
 def login_view(request):
@@ -1302,7 +1437,7 @@ def add_user(request):
         
         username     = dj_forms.CharField(max_length=150, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
         password     = dj_forms.CharField(widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}), min_length=6)
-        role         = dj_forms.ChoiceField(choices=[('physician', 'Physician'),('physician_admin', 'Physician Administrator'), ('admin', 'Administrator')],
+        role         = dj_forms.ChoiceField(choices=[('physician', 'Physician'),('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Nursing')],
                                              widget=dj_forms.Select(attrs={'class': 'form-control'}))
         
         scope        = dj_forms.ChoiceField(
@@ -1316,13 +1451,7 @@ def add_user(request):
             widget=dj_forms.Select(attrs={'class': 'form-control'}),
         )
 
-        physician    = dj_forms.ModelChoiceField(
-            queryset=Physician.objects.filter(is_active=True).exclude(userprofile__isnull=False),
-            required=False,
-            empty_label='— Not linked to a physician record —',
-            widget=dj_forms.Select(attrs={'class': 'form-control'}),
-            help_text='Link this account to a physician record so they can submit time-off requests.'
-        )
+        
 
     if request.method == 'POST':
         form = AddUserForm(request.POST)
@@ -1342,7 +1471,7 @@ def add_user(request):
                 defaults={
                     'role': form.cleaned_data['role'],
                     'scope': form.cleaned_data.get('scope', 'nroc'),
-                    'physician': form.cleaned_data.get('physician') or None,
+                    'physician': None,
                 },
             )
                 messages.success(request, f"Account created for {user.get_full_name() or user.username}.")
@@ -1368,7 +1497,7 @@ def edit_user(request, pk):
     class EditUserForm(dj_forms.Form):
         
        
-        role        = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('physician_admin', 'Physician Administrator'), ('admin', 'Administrator')],
+        role        = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Nursing')],
                                             widget=dj_forms.Select(attrs={'class': 'form-control'}))
         scope   = dj_forms.ChoiceField(
             label='Group',
@@ -1380,12 +1509,7 @@ def edit_user(request, pk):
             initial='nroc',
             widget=dj_forms.Select(attrs={'class': 'form-control'}),
         )
-        physician   = dj_forms.ModelChoiceField(
-            queryset=Physician.objects.filter(is_active=True),
-            required=False,
-            empty_label='— Not linked to a physician record —',
-            widget=dj_forms.Select(attrs={'class': 'form-control'}),
-        )
+       
         new_password = dj_forms.CharField(
             required=False, min_length=6,
             widget=dj_forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Leave blank to keep current'}),
@@ -1404,7 +1528,7 @@ def edit_user(request, pk):
             user.save()
             profile.role      = cd['role']
             profile.scope     = cd.get('scope', 'nroc')
-            profile.physician = cd.get('physician')
+            profile.physician = None
             profile.save()
             messages.success(request, f"Account updated for {user.get_full_name() or user.username}.")
             return redirect('user_management')
@@ -1415,7 +1539,7 @@ def edit_user(request, pk):
             'email':      user.email,
             'role':       profile.role,
             'scope':      profile.scope,
-            'physician':  profile.physician,
+            
             'is_active':  user.is_active,
         })
 
@@ -1484,4 +1608,190 @@ def change_password(request):
         'form': form,
         'title': 'Change Password',
         'back_url': 'dashboard',
+    })
+
+# ─── On-Call Schedule Views ─────────────────────────────────────────────────
+#
+# On-call is weekend-only: each entry covers Saturday + Sunday as a single
+# assignment, keyed by the Saturday date.
+#
+# Viewing is open to every authenticated user.
+# Create / edit / delete is admin-only.
+
+def _weekend_starts_in_range(start_date, end_date):
+    """Yield every Saturday between start_date and end_date inclusive.
+
+    If start_date is a Sunday, walk back one day so its Saturday is
+    included (otherwise that weekend would be cut in half).
+    """
+    if start_date.weekday() == 6:  # Sunday
+        start_date = start_date - timedelta(days=1)
+
+    # Advance to the first Saturday on or after start_date
+    days_ahead = (5 - start_date.weekday()) % 7  # 5 = Saturday
+    sat = start_date + timedelta(days=days_ahead)
+
+    while sat <= end_date:
+        yield sat
+        sat += timedelta(days=7)
+
+
+@login_required_custom
+def on_call_schedule(request):
+    """Display the weekend on-call schedule.
+
+    Query params:
+      - group:      'nroc' | 'psa' | 'all'   (default 'all')
+      - start_date: ISO date (default today)
+      - end_date:   ISO date (default start_date + 90 days, ~13 weekends)
+
+    Every authenticated user can view this page.
+    """
+    group_filter = request.GET.get('group', 'all')
+    if group_filter not in ('nroc', 'psa', 'all'):
+        group_filter = 'all'
+
+    today = date.today()
+
+    try:
+        start_date = datetime.datetime.strptime(
+            request.GET.get('start_date', ''), '%Y-%m-%d'
+        ).date()
+    except (ValueError, TypeError):
+        start_date = today
+    try:
+        end_date = datetime.datetime.strptime(
+            request.GET.get('end_date', ''), '%Y-%m-%d'
+        ).date()
+    except (ValueError, TypeError):
+        end_date = start_date + timedelta(days=90)
+
+    if end_date < start_date:
+        end_date = start_date + timedelta(days=90)
+
+    # Pull every entry whose Saturday is inside the requested window
+    entries_qs = OnCallSchedule.objects.filter(
+        weekend_start_date__gte=start_date - timedelta(days=1),
+        weekend_start_date__lte=end_date,
+    ).select_related('physician').order_by('weekend_start_date', 'group')
+
+    if group_filter in ('nroc', 'psa'):
+        entries_qs = entries_qs.filter(group=group_filter)
+
+    # Bucket by weekend (Saturday) → one row per weekend in the template
+    by_weekend = {}
+    for sat in _weekend_starts_in_range(start_date, end_date):
+        by_weekend[sat] = {
+            'saturday': sat,
+            'sunday': sat + timedelta(days=1),
+            'nroc': [],
+            'psa': [],
+        }
+
+    for entry in entries_qs:
+        sat = entry.weekend_start_date
+        if sat in by_weekend:
+            by_weekend[sat][entry.group].append(entry)
+
+    weekend_rows = [by_weekend[s] for s in sorted(by_weekend.keys())]
+
+    # "This weekend" highlight: only if today is Sat or Sun
+    current_weekend_saturday = None
+    if today.weekday() == 5:                # today is Saturday
+        current_weekend_saturday = today
+    elif today.weekday() == 6:              # today is Sunday → use yesterday's Sat
+        current_weekend_saturday = today - timedelta(days=1)
+
+    is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
+
+    return render(request, 'coverage_tracker/on_call_schedule.html', {
+        'weekend_rows': weekend_rows,
+        'group_filter': group_filter,
+        'start_date': start_date,
+        'end_date': end_date,
+        'today': today,
+        'current_weekend_saturday': current_weekend_saturday,
+        'is_admin': is_admin,
+        'show_nroc': group_filter in ('nroc', 'all'),
+        'show_psa': group_filter in ('psa', 'all'),
+    })
+
+
+# AFTER
+@admin_required
+def add_on_call(request):
+    """Admin: add a new weekend on-call entry."""
+    initial_group = request.GET.get('group')  # 'nroc' / 'psa' optional preselect
+    initial_weekend = request.GET.get('weekend_start_date')  # 'YYYY-MM-DD' optional
+
+    if request.method == 'POST':
+        form = OnCallScheduleForm(request.POST)
+        if form.is_valid():
+            entry = form.save(commit=False)
+            try:
+                entry.save()
+                messages.success(
+                    request,
+                    f"Weekend on-call added: {entry.physician} — {entry.weekend_label}."
+                )
+                return redirect('on_call_schedule')
+            except IntegrityError:
+                # Race: another admin saved a conflicting row between our
+                # form.is_valid() check and this save. Surface the same
+                # friendly message we'd have shown if we'd caught it earlier.
+                form.add_error(
+                    None,
+                    "Another admin just saved a conflicting entry. "
+                    "Please reload the schedule and try again."
+                )
+        # Falls through to re-render with form errors visible
+    else:
+        form = OnCallScheduleForm(group=initial_group, weekend_start_date=initial_weekend)
+
+    return render(request, 'coverage_tracker/on_call_form.html', {
+        'form': form,
+        'title': 'Add Weekend On-Call',
+        'back_url': 'on_call_schedule',
+    })
+
+
+@admin_required
+def edit_on_call(request, pk):
+    """Admin: edit an existing weekend on-call entry."""
+    entry = get_object_or_404(OnCallSchedule, pk=pk)
+
+    if request.method == 'POST':
+        form = OnCallScheduleForm(request.POST, instance=entry)
+        if form.is_valid():
+            updated = form.save(commit=False)
+            try:
+                updated.save()
+                messages.success(request, 'Weekend on-call updated.')
+                return redirect('on_call_schedule')
+            except IntegrityError:
+                form.add_error(
+                    None,
+                    "Another admin just saved a conflicting entry. "
+                    "Please reload the schedule and try again."
+                )
+    else:
+        form = OnCallScheduleForm(instance=entry)
+
+    return render(request, 'coverage_tracker/on_call_form.html', {
+        'form': form,
+        'title': 'Edit Weekend On-Call',
+        'back_url': 'on_call_schedule',
+        'entry': entry,
+    })
+
+@admin_required
+def delete_on_call(request, pk):
+    """Admin: delete an on-call entry."""
+    entry = get_object_or_404(OnCallSchedule, pk=pk)
+    if request.method == 'POST':
+        entry.delete()
+        messages.success(request, 'Weekend on-call removed.')
+        return redirect('on_call_schedule')
+    return render(request, 'coverage_tracker/on_call_confirm_delete.html', {
+        'entry': entry,
     })

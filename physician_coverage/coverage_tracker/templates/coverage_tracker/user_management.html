@@ -17,8 +17,7 @@
           <th>Name</th>
           <th>Username</th>
           <th>Role</th>
-          <th>Group</th>
-          <th>Linked Physician</th>
+          <th>Group</th>         
           <th>Status</th>
           <th>Actions</th>
         </tr>
@@ -65,16 +64,7 @@
               <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);">Both</span>
             {% endif %}
           </td>
-          <td>
-            {% if user.profile.physician %}
-              <a href="/physicians/{{ user.profile.physician.pk }}/" style="color:var(--teal);text-decoration:none;font-size:13px;">
-                {{ user.profile.physician }}
-              </a>
-              <div class="text-muted text-sm">{{ user.profile.physician.get_physician_type_display }}</div>
-            {% else %}
-              <span class="text-muted">— not linked —</span>
-            {% endif %}
-          </td>
+          
           <td>
             {% if user.is_active %}
               <span style="font-size:12px;color:var(--green);">● Active</span>
@@ -147,6 +137,17 @@
         <li>✗ Cannot see locum rates or costs</li>
         <li>✗ Cannot approve requests or assign coverage</li>
         <li>✗ Cannot add or edit physician records</li>
+      </ul>
+    </div>
+    <div style="background:rgba(46,194,126,0.07);border:1px solid rgba(46,194,126,0.2);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;color:var(--green);margin-bottom:6px;">🩺 Nursing</div>
+      <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
+        <li>✓ Can only see the Clinics page (read-only)</li>
+        <li>✗ Cannot submit or view time off</li>
+        <li>✗ Cannot see the on-call schedule</li>
+        <li>✗ Cannot assign coverage or edit clinics</li>
+        <li>✗ Cannot change their own password</li>
+        <li>✗ Cannot manage user accounts</li>
       </ul>
     </div>
   </div>
