@@ -36,8 +36,8 @@
          onmouseover="this.style.background='var(--card-hover)'" onmouseout="this.style.background=''">
       <div style="min-width:190px;padding:8px;display:flex;align-items:center;gap:8px;">
         <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;
-          {% if row.physician.physician_type == 'locum' %}background:rgba(155,89,182,0.25);color:#c39bd3;
-          {% elif row.physician.physician_type == 'psa' %}background:rgba(52,152,219,0.25);color:#7fb3d6;
+          {% if row.physician.physician_type == 'locum' %}background:rgba(155,89,182,0.25); color:#c39bd3;
+          {% elif row.physician.physician_type == 'psa' %}background:var(--psa-bg);color:var(--psa);
           {% else %}background:rgba(0,184,169,0.2);color:var(--teal);{% endif %}">
           {{ row.physician.first_name.0 }}{{ row.physician.last_name.0 }}
         </div>

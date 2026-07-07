@@ -3,14 +3,14 @@
 {% block content %}
 <div class="page-header">
   <div class="flex items-center gap-3">
-    <div class="avatar {% if physician.is_locum %}avatar-locum{% else %}avatar-regular{% endif %}" style="width:48px;height:48px;font-size:15px;">
+    <div class="avatar {% if physician.is_locum %}avatar-locum{% elif physician.is_psa %}avatar-psa{% else %}avatar-regular{% endif %}" style="width:48px;height:48px;font-size:15px;">
       {{ physician.first_name.0 }}{{ physician.last_name.0 }}
     </div>
     <div>
       <div class="flex items-center gap-2">
         <h1>{{ physician }}</h1>
-        <span class="badge {% if physician.is_locum %}badge-locum{% else %}badge-regular{% endif %}">
-          {% if physician.is_locum %}Locum{% else %}Regular{% endif %}
+        <span class="badge {% if physician.is_locum %}badge-locum{% elif physician.is_psa %}badge-psa{% else %}badge-regular{% endif %}">
+          {% if physician.is_locum %}Locum{% elif physician.is_psa %}PSA{% else %}NROC{% endif %}
         </span>
       </div>
       <p class="text-muted text-sm mt-1">

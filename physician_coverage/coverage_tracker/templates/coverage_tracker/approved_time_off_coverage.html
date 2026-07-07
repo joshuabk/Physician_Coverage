@@ -38,7 +38,7 @@
 <div class="card" style="margin-bottom:0.75rem; border-color:rgba(245,166,35,0.25);">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
     <div style="display:flex; gap:1rem; align-items:flex-start; flex:1; min-width:0;">
-      <div class="avatar avatar-regular" style="margin-top:2px; flex-shrink:0;">
+     <div class="avatar avatar-{{ item.request.physician.physician_type }}" style="margin-top:2px; flex-shrink:0;">
         {{ item.request.physician.first_name.0 }}{{ item.request.physician.last_name.0 }}
       </div>
       <div style="flex:1; min-width:0;">
@@ -105,7 +105,7 @@
 <div class="card" style="margin-bottom:0.75rem; border-color:rgba(46,194,126,0.15);">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
     <div style="display:flex; gap:1rem; align-items:flex-start; flex:1; min-width:0;">
-      <div class="avatar avatar-regular" style="margin-top:2px; flex-shrink:0;">
+      <div class="avatar avatar-{{ item.request.physician.physician_type }}" style="margin-top:2px; flex-shrink:0;">
         {{ item.request.physician.first_name.0 }}{{ item.request.physician.last_name.0 }}
       </div>
       <div style="flex:1; min-width:0;">

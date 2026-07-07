@@ -124,8 +124,8 @@ class PhysicianAvailabilityForm(forms.ModelForm):
 class OnCallScheduleForm(forms.ModelForm):
     """Form for adding/editing a weekend on-call assignment.
 
-    The `weekend_start_date` field must be a Saturday — enforced both
-    client-side (the date input is wired to snap to Saturdays in JS) and
+    The `weekend_start_date` field must be a Monday — enforced both
+    client-side (the date input is wired to snap to Mondays in JS) and
     server-side (model `clean()`).
     """
 
@@ -133,7 +133,7 @@ class OnCallScheduleForm(forms.ModelForm):
         model = OnCallSchedule
         fields = ['group', 'weekend_start_date', 'physician', 'notes']
         labels = {
-            'weekend_start_date': 'Saturday (start of weekend)',
+            'weekend_start_date': 'Monday (start of week)',
         }
         widgets = {
             'group': forms.Select(attrs={'class': 'form-control', 'id': 'id_oncall_group'}),
@@ -178,10 +178,10 @@ class OnCallScheduleForm(forms.ModelForm):
         weekend_start = cleaned.get('weekend_start_date')
 
         # Saturday check (Python: Monday=0 .. Saturday=5, Sunday=6)
-        if weekend_start is not None and weekend_start.weekday() != 5:
+        if weekend_start is not None and weekend_start.weekday() != 0:
             self.add_error(
                 'weekend_start_date',
-                'Please pick a Saturday — the weekend covers Sat + Sun.'
+                'Please pick a Monday — the shift runs Mon through Sun.'
             )
 
         if group and physician:

@@ -365,9 +365,9 @@ class CoverageRequest(models.Model):
 class OnCallSchedule(models.Model):
     """Weekend on-call schedule entries for NROC and PSA physicians.
 
-    Each row represents one full weekend (Saturday + Sunday) of on-call
-    coverage for one physician in one group. The weekend is uniquely
-    identified by its Saturday date (`weekend_start_date`).
+    Each row represents one full week Mon - SUn of on-call
+    coverage for one physician in one group. The wee is uniquely
+    identified by its monoday date (`weekend_start_date`).
 
     A physician can be on call for at most one weekend per (group, weekend)
     combination, but two physicians from different groups CAN cover the
@@ -385,10 +385,10 @@ class OnCallSchedule(models.Model):
     physician = models.ForeignKey(
         Physician, on_delete=models.CASCADE, related_name='on_call_entries',
         limit_choices_to={'physician_type__in': ['regular', 'psa']},
-        help_text="Physician scheduled to be on call this weekend."
+        help_text="Physician scheduled to be on call this week."
     )
     weekend_start_date = models.DateField(
-        help_text="Saturday that starts the weekend (Sunday is implied)."
+        help_text="Monday that starts the on-call week (runs through Sunday)."
     )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -406,43 +406,41 @@ class OnCallSchedule(models.Model):
     def __str__(self):
         return (
             f"{self.get_group_display()} on-call — {self.physician} "
-            f"weekend of {self.weekend_start_date:%b %d, %Y}"
+            f"week of {self.weekend_start_date:%b %d, %Y}"
         )
 
     @property
-    def saturday(self):
+    def monday(self):
         return self.weekend_start_date
 
     @property
     def sunday(self):
-        return self.weekend_start_date + datetime.timedelta(days=1)
+        return self.weekend_start_date + datetime.timedelta(days=6)
 
     @property
     def weekend_label(self):
-        sat = self.saturday
+        mon = self.monday
         sun = self.sunday
         # Format the day-of-month manually so it works on Windows too
         # (Windows strftime has no portable "no zero-pad" code).
-        sat_month = sat.strftime("%b")
+        mon_month = mon.strftime("%b")
         sun_month = sun.strftime("%b")
-        if sat.month == sun.month:
-            # "Jun 7–8, 2026"
-            return f"{sat_month} {sat.day}–{sun.day}, {sat.year}"
-        # "Jun 30 – Jul 1, 2026"
-        return f"{sat_month} {sat.day} – {sun_month} {sun.day}, {sat.year}"
+        if mon.month == sun.month:
+            # "Jun 1–7, 2026"
+            return f"{mon_month} {mon.day}–{sun.day}, {mon.year}"
+        # "Jun 29 – Jul 5, 2026"
+        return f"{mon_month} {mon.day} – {sun_month} {sun.day}, {mon.year}"
 
     def clean(self):
-        """Validate physician/group match and that the date is a Saturday."""
+        """Validate physician/group match and that the date is a Monday."""
         from django.core.exceptions import ValidationError
 
         errors = {}
 
         if self.weekend_start_date is not None:
             # Python's weekday(): Monday=0 .. Saturday=5, Sunday=6
-            if self.weekend_start_date.weekday() != 5:
-                errors['weekend_start_date'] = (
-                    "Weekend on-call must start on a Saturday."
-                )
+            if self.weekend_start_date.weekday() != 0:   # 0 = Monday
+                errors['weekend_start_date'] = "On-call shifts must start on a Monday."
 
         if self.physician_id and self.group:
             if self.group == 'nroc' and not self.physician.is_regular:

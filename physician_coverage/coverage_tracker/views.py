@@ -400,24 +400,24 @@ def _on_call_weekends_for_physicians(physician_qs):
     """Build a JSON-serializable dict of upcoming on-call weekends per physician.
 
     Used by the time-off form's client-side warning: if a vacation ends on
-    the Friday before, or starts on the Monday after, one of the physician's
-    on-call weekends, the form pops a confirm() dialog before submitting.
+    the day before, or starts on the day after, one of the physician's
+    on-call shifts (Mon–Sun), the form pops a confirm() dialog before submitting.
 
-    Returns {physician_id (str): [saturday_iso, ...]}. Only weekends from
-    today onward are included — past weekends can't conflict with a new
-    request. Keys are strings because the <select> option values render as
-    strings in the rendered template, which keeps the JS lookup trivial.
+    Returns {physician_id (str): [monday_iso, ...]}. Includes the current
+    in-progress week (Monday up to six days back) plus everything onward —
+    past shifts can't conflict with a new
     """
     today = timezone.now().date()
     entries = OnCallSchedule.objects.filter(
         physician__in=physician_qs,
-        weekend_start_date__gte=today,
+        weekend_start_date__gte=today - timedelta(days=6),
     ).values_list('physician_id', 'weekend_start_date')
 
+
     result = {}
-    for pid, sat in entries:
-        result.setdefault(str(pid), []).append(sat.isoformat())
-    return result
+    for pid, mon in entries:
+        result.setdefault(str(pid), []).append(mon.isoformat())
+   
 
 def _oncall_conflicts_for_request(physician, start_date, end_date):
     """Detect on-call duty that collides with a proposed time-off window.
@@ -427,9 +427,9 @@ def _oncall_conflicts_for_request(physician, start_date, end_date):
       * the day AFTER the time off ends, or
       * any day DURING the time off (start_date .. end_date inclusive).
 
-    Each OnCallSchedule row covers a full weekend — the Saturday
-    (`weekend_start_date`) plus the following Sunday — so every entry
-    contributes two candidate on-call days. A weekend conflicts when either
+    Each OnCallSchedule row covers a full week — Monday
+    (`weekend_start_date`) through the following Sunday — so every entry
+    contributes seven candidate on-call days. A shift conflicts when any
     of those days falls inside the window [start_date - 1, end_date + 1].
 
     Returns a list of human-readable warning strings (empty when there is
@@ -446,26 +446,20 @@ def _oncall_conflicts_for_request(physician, start_date, end_date):
     # Sunday), then classify each candidate day precisely below.
     entries = OnCallSchedule.objects.filter(
         physician=physician,
-        weekend_start_date__gte=window_start - timedelta(days=1),
+        weekend_start_date__gte=window_start - timedelta(days=6),
         weekend_start_date__lte=window_end,
     ).order_by('weekend_start_date')
 
     warnings = []
     for entry in entries:
-        for on_call_day in (entry.saturday, entry.sunday):
-            if on_call_day < window_start or on_call_day > window_end:
-                continue
-            if on_call_day < start_date:
-                relation = 'the day before the time off begins'
-            elif on_call_day > end_date:
-                relation = 'the day after the time off ends'
-            else:
-                relation = 'during the time off'
-            warnings.append(
-                f"{physician} is on call ({entry.get_group_display()}) on "
-                f"{on_call_day:%a, %b %d, %Y} — {relation} "
-                f"(on-call weekend of {entry.weekend_label})."
-            )
+        for offset in range(7):  # Monday .. Sunday
+            on_call_day = entry.monday + timedelta(days=offset)
+            if start_date <= on_call_day <= end_date:
+                warnings.append(
+                    f"{physician} is on call ({entry.get_group_display()}) on "
+                    f"{on_call_day:%a, %b %d, %Y} — during the requested time off "
+                    f"(on-call week of {entry.weekend_label})."
+                )
     return warnings
 
 
@@ -1634,26 +1628,15 @@ def change_password(request):
 # Create / edit / delete is admin-only.
 
 def _weekend_starts_in_range(start_date, end_date):
-    """Yield every Saturday between start_date and end_date inclusive.
-
-    If start_date is a Sunday, walk back one day so its Saturday is
-    included (otherwise that weekend would be cut in half).
-    """
-    if start_date.weekday() == 6:  # Sunday
-        start_date = start_date - timedelta(days=1)
-
-    # Advance to the first Saturday on or after start_date
-    days_ahead = (5 - start_date.weekday()) % 7  # 5 = Saturday
-    sat = start_date + timedelta(days=days_ahead)
-
-    while sat <= end_date:
-        yield sat
-        sat += timedelta(days=7)
+    monday = start_date - timedelta(days=start_date.weekday())
+    while monday <= end_date:
+        yield monday
+        monday += timedelta(days=7)
 
 
 @login_required_custom
 def on_call_schedule(request):
-    """Display the weekend on-call schedule.
+    """Display the week on-call schedule.
 
     Query params:
       - group:      'nroc' | 'psa' | 'all'   (default 'all')
@@ -1686,36 +1669,32 @@ def on_call_schedule(request):
 
     # Pull every entry whose Saturday is inside the requested window
     entries_qs = OnCallSchedule.objects.filter(
-        weekend_start_date__gte=start_date - timedelta(days=1),
+        weekend_start_date__gte=start_date - timedelta(days=6),
         weekend_start_date__lte=end_date,
     ).select_related('physician').order_by('weekend_start_date', 'group')
 
     if group_filter in ('nroc', 'psa'):
         entries_qs = entries_qs.filter(group=group_filter)
 
-    # Bucket by weekend (Saturday) → one row per weekend in the template
     by_weekend = {}
-    for sat in _weekend_starts_in_range(start_date, end_date):
-        by_weekend[sat] = {
-            'saturday': sat,
-            'sunday': sat + timedelta(days=1),
+    for mon in _weekend_starts_in_range(start_date, end_date):
+        by_weekend[mon] = {
+            'monday': mon,
+            'sunday': mon + timedelta(days=6),
             'nroc': [],
             'psa': [],
         }
 
     for entry in entries_qs:
-        sat = entry.weekend_start_date
-        if sat in by_weekend:
-            by_weekend[sat][entry.group].append(entry)
+        mon = entry.weekend_start_date
+        if mon in by_weekend:
+            by_weekend[mon][entry.group].append(entry)
 
-    weekend_rows = [by_weekend[s] for s in sorted(by_weekend.keys())]
+    weekend_rows = [by_weekend[m] for m in sorted(by_weekend.keys())]
 
-    # "This weekend" highlight: only if today is Sat or Sun
-    current_weekend_saturday = None
-    if today.weekday() == 5:                # today is Saturday
-        current_weekend_saturday = today
-    elif today.weekday() == 6:              # today is Sunday → use yesterday's Sat
-        current_weekend_saturday = today - timedelta(days=1)
+    current_shift_monday = today - timedelta(days=today.weekday())
+
+    
 
     is_admin = getattr(getattr(request.user, 'profile', None), 'is_admin', False)
 
@@ -1725,7 +1704,7 @@ def on_call_schedule(request):
         'start_date': start_date,
         'end_date': end_date,
         'today': today,
-        'current_weekend_saturday': current_weekend_saturday,
+        'current_shift_monday': current_shift_monday,
         'is_admin': is_admin,
         'show_nroc': group_filter in ('nroc', 'all'),
         'show_psa': group_filter in ('psa', 'all'),
@@ -1735,7 +1714,7 @@ def on_call_schedule(request):
 # AFTER
 @admin_required
 def add_on_call(request):
-    """Admin: add a new weekend on-call entry."""
+    """Admin: add a new week on-call entry."""
     initial_group = request.GET.get('group')  # 'nroc' / 'psa' optional preselect
     initial_weekend = request.GET.get('weekend_start_date')  # 'YYYY-MM-DD' optional
 
@@ -1747,7 +1726,7 @@ def add_on_call(request):
                 entry.save()
                 messages.success(
                     request,
-                    f"Weekend on-call added: {entry.physician} — {entry.weekend_label}."
+                    f"Week on-call added: {entry.physician} — {entry.weekend_label}."
                 )
                 return redirect('on_call_schedule')
             except IntegrityError:
@@ -1765,14 +1744,14 @@ def add_on_call(request):
 
     return render(request, 'coverage_tracker/on_call_form.html', {
         'form': form,
-        'title': 'Add Weekend On-Call',
+        'title': 'Add Week On-Call',
         'back_url': 'on_call_schedule',
     })
 
 
 @admin_required
 def edit_on_call(request, pk):
-    """Admin: edit an existing weekend on-call entry."""
+    """Admin: edit an existing week on-call entry."""
     entry = get_object_or_404(OnCallSchedule, pk=pk)
 
     if request.method == 'POST':
@@ -1781,7 +1760,7 @@ def edit_on_call(request, pk):
             updated = form.save(commit=False)
             try:
                 updated.save()
-                messages.success(request, 'Weekend on-call updated.')
+                messages.success(request, 'Week on-call updated.')
                 return redirect('on_call_schedule')
             except IntegrityError:
                 form.add_error(
@@ -1794,7 +1773,7 @@ def edit_on_call(request, pk):
 
     return render(request, 'coverage_tracker/on_call_form.html', {
         'form': form,
-        'title': 'Edit Weekend On-Call',
+        'title': 'Edit Week On-Call',
         'back_url': 'on_call_schedule',
         'entry': entry,
     })
@@ -1805,7 +1784,7 @@ def delete_on_call(request, pk):
     entry = get_object_or_404(OnCallSchedule, pk=pk)
     if request.method == 'POST':
         entry.delete()
-        messages.success(request, 'Weekend on-call removed.')
+        messages.success(request, 'Week on-call removed.')
         return redirect('on_call_schedule')
     return render(request, 'coverage_tracker/on_call_confirm_delete.html', {
         'entry': entry,

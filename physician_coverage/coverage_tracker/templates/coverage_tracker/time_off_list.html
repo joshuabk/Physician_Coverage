@@ -56,9 +56,9 @@
            {{ req.physician }}
            </a>
             {% if req.physician.is_regular %}
-             <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);margin-left:6px;">NROC</span>
+             <span class="badge badge-regular" style="margin-left:6px;">NROC</span>
            {% elif req.physician.is_psa %}
-            <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);margin-left:6px;">PSA</span>
+            <span class="badge badge-psa" style="margin-left:6px;">PSA</span>
             {% endif %}
             {% else %}
             <span style="font-weight:500;">{{ req.physician }}</span>

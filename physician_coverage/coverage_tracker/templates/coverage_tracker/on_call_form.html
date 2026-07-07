@@ -21,7 +21,7 @@
             <div id="weekend-preview"
                  style="margin-top:6px;font-size:12.5px;color:var(--teal);min-height:18px;"></div>
             <div style="color:var(--text-3); font-size:12px; margin-top:3px;">
-              Pick any Saturday — the assignment covers that Sat + Sun as one weekend.
+              Pick any Monday — the assignment covers that week
             </div>
           {% endif %}
 
@@ -51,7 +51,7 @@
           <a href="/on-call/{{ entry.pk }}/delete/"
              class="btn btn-danger"
              style="margin-left:auto;"
-             onclick="return confirm('Permanently delete this weekend on-call?')">Delete</a>
+            >Delete</a>
         {% endif %}
       </div>
     </form>
@@ -89,7 +89,7 @@
     rebuildPhysicians();
   }
 
-  // ── 2) Saturday-snap + live "Weekend of …" preview ───────────────────────
+  // ── 2) Monday-snap + live "Week of …" preview ───────────────────────
   var dateInput = document.getElementById('id_weekend_start_date');
   var preview   = document.getElementById('weekend-preview');
   if (!dateInput) return;
@@ -110,27 +110,21 @@
                      parseInt(parts[1], 10) - 1,
                      parseInt(parts[2], 10));
 
-    // JS: Sunday=0, Saturday=6
-    if (d.getDay() !== 6) {
-      // Auto-snap to a Saturday. Sunday belongs to the previous weekend's
-      // Saturday (one day back). Mon–Fri also roll back to that week's Sat.
+   // JS: Sunday=0, Monday=1
+    if (d.getDay() !== 1) {
       var dayOfWeek = d.getDay();
-      var offsetToSat = dayOfWeek === 0
-        ? -1                          // Sunday → previous Saturday
-        : -(dayOfWeek + 1);           // Mon..Fri → previous Saturday
-      d.setDate(d.getDate() + offsetToSat);
-
-      var yyyy = d.getFullYear();
-      var mm = String(d.getMonth() + 1).padStart(2, '0');
-      var dd = String(d.getDate()).padStart(2, '0');
-      dateInput.value = yyyy + '-' + mm + '-' + dd;
+      var offsetToMon = dayOfWeek === 0
+        ? -6                          
+        : -(dayOfWeek - 1);           // Tue..Sat → that week's Monday
+      d.setDate(d.getDate() + offsetToMon);
+      // ...write d back into the input (unchanged lines)...
     }
 
-    var sat = d;
+    var mon = d;
     var sun = new Date(d);
-    sun.setDate(sun.getDate() + 1);
+    sun.setDate(sun.getDate() + 6);
     if (preview) {
-      preview.textContent = 'Weekend of ' + formatDate(sat) + ' – ' + formatDate(sun);
+     preview.textContent = 'On-call shift of ' + formatDate(mon) + ' – ' + formatDate(sun);
     }
   }
 

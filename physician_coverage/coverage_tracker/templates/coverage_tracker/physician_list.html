@@ -61,7 +61,7 @@
         <tr>
           <td>
             <div class="flex items-center gap-3">
-              <div class="avatar avatar-regular">{{ s.physician.first_name.0 }}{{ s.physician.last_name.0 }}</div>
+              <div class="avatar {% if s.physician.is_psa %}avatar-psa{% else %}avatar-regular{% endif %}">{{ s.physician.first_name.0 }}{{ s.physician.last_name.0 }}</div>
               <div>
                 <a href="/physicians/{{ s.physician.pk }}/" style="color:var(--text);text-decoration:none;font-weight:500;">Dr. {{ s.physician.first_name }} {{ s.physician.last_name }}</a>
                 <div class="text-muted text-sm">{{ s.physician.email }}</div>

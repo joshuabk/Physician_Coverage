@@ -57,9 +57,9 @@
           </td>
           <td>
             {% if user.profile.scope == 'nroc' %}
-              <span class="badge" style="background:rgba(0,184,169,0.15);color:var(--teal);">NROC</span>
+              <span class="badge badge-regular">NROC</span>
             {% elif user.profile.scope == 'psa' %}
-              <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);">PSA</span>
+              <span class="badge badge-psa">PSA</span>
             {% else %}
               <span class="badge" style="background:rgba(245,166,35,0.15);color:var(--amber);">Both</span>
             {% endif %}

@@ -172,7 +172,7 @@
       {% if out_today %}
         {% for req in out_today %}
         <div class="flex items-center gap-3" style="padding:8px 0;border-bottom:1px solid var(--border);">
-          <div class="avatar avatar-regular">{{ req.physician.first_name.0 }}{{ req.physician.last_name.0 }}</div>
+          <div class="avatar avatar-{{ req.physician.physician_type }}">{{ req.physician.first_name.0 }}{{ req.physician.last_name.0 }}</div>
           <div>
             <div style="font-weight:500;font-size:13.5px;">{{ req.physician }}</div>
             <div class="text-muted text-sm">{{ req.get_request_type_display }} · back {{ req.end_date|date:"M j" }}</div>
