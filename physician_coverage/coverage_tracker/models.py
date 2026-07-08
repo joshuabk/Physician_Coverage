@@ -103,11 +103,15 @@ class Physician(models.Model):
         return self.physician_type == 'psa'
 
     def days_taken(self, year=None):
-        """Approved time off charged in BUSINESS days (matches TimeOffRequest.duration_days)."""
+        """Approved VACATION charged in BUSINESS days (matches
+        TimeOffRequest.duration_days). Sick, conference, personal, and other
+        leave types do not draw down the vacation allowance."""
         if year is None:
             year = timezone.now().year
         total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='approved', start_date__year=year):
+        for req in TimeOffRequest.objects.filter(physician=self, status='approved',
+                                                 request_type='vacation',
+                                                 start_date__year=year):
             total += req.duration_days
         return total
 
@@ -115,10 +119,14 @@ class Physician(models.Model):
         return self.total_vacation_days - self.days_taken(year)
 
     def days_pending(self, year=None):
+        """Pending VACATION only, so it can be compared against the vacation
+        allowance consistently with days_taken."""
         if year is None:
             year = timezone.now().year
         total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='pending', start_date__year=year):
+        for req in TimeOffRequest.objects.filter(physician=self, status='pending',
+                                                 request_type='vacation',
+                                                 start_date__year=year):
             total += req.duration_days
         return total
 
