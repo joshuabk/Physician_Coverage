@@ -9,7 +9,7 @@
   {% if request.user.profile.is_admin %}
   <div class="flex gap-2">
     <a href="/clinics/add/" class="btn btn-ghost">+ Add Clinic</a>
-    <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" class="btn btn-primary">+ Assign Locum</a>
+    
   </div>
   {% endif %}
 </div>
@@ -73,11 +73,37 @@
                 {% endif %}
               </div>
               {% endfor %}
-            {% else %}
+            {% endif %}
+            {% if item.out_links %}
               <div style="color:var(--red);font-size:13px;padding:4px 0;">
-                ⚠ Coverage needed {% if request.user.profile.is_admin %} —
-                <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" style="color:var(--teal);">Assign locum</a>{% endif %}
+                ⚠ Coverage needed
               </div>
+              {% if request.user.profile.is_admin %}
+                {% for o in item.out_links %}
+                <form method="post" action="/clinics/assign-day/"
+                      style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;">
+                  {% csrf_token %}
+                  <input type="hidden" name="clinic" value="{{ item.clinic.pk }}">
+                  <input type="hidden" name="physician" value="{{ o.physician.pk }}">
+                  <input type="hidden" name="date" value="{{ view_date|date:'Y-m-d' }}">
+                  <span style="font-size:12.5px;color:var(--text-2);white-space:nowrap;">Dr. {{ o.physician.last_name }}:</span>
+                  {% if available_locums %}
+                  <select name="locum" class="form-control" style="width:auto;padding:4px 8px;font-size:12.5px;">
+                    {% for l in available_locums %}
+                    <option value="{{ l.pk }}">{{ l }}</option>
+                    {% endfor %}
+                  </select>
+                  <input type="number" name="hours" value="8" step="0.25" min="0"
+                         class="form-control" style="width:64px;padding:4px 8px;font-size:12.5px;" title="Hours">
+                  <button type="submit" class="btn btn-ghost btn-sm">Assign for {{ view_date|date:'M j' }}</button>
+                  {% else %}
+                  <span class="text-muted text-sm">no unassigned locums this day</span>
+                  {% endif %}
+                </form>
+                {% endfor %}
+              {% endif %}
+            {% elif not item.assignments %}
+              <div class="text-muted text-sm" style="padding:4px 0;">Covered via another clinic.</div>
             {% endif %}
           </div>
           {% elif item.assignments %}
@@ -118,7 +144,7 @@
           
         </div>
         
-        <a href="/coverage/add/?date={{ view_date|date:'Y-m-d' }}" class="btn btn-ghost btn-sm">Assign</a>
+        
         
       </div>
       {% empty %}

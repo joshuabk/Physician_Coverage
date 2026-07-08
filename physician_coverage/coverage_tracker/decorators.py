@@ -4,7 +4,7 @@ from django.contrib import messages
 
 
 
-NURSING_ALLOWED_URLS = {'clinic_list', 'change_password'}
+NURSING_ALLOWED_URLS = {'clinic_list'}
 
 
 

@@ -29,6 +29,7 @@ urlpatterns = [
 
     # Clinics & Coverage
     path('clinics/', views.clinic_list, name='clinic_list'),
+    path('clinics/assign-day/', views.assign_day_coverage, name='assign_day_coverage'),
     path('clinics/add/', views.add_clinic, name='add_clinic'),
     path('clinics/<int:pk>/edit/', views.edit_clinic, name='edit_clinic'),
     path('coverage/add/', views.add_coverage, name='add_coverage'),

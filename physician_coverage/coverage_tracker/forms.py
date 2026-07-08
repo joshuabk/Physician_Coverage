@@ -75,14 +75,14 @@ class TimeOffRequestForm(forms.ModelForm):
 class CoverageAssignmentForm(forms.ModelForm):
     class Meta:
         model = CoverageAssignment
-        fields = ['clinic', 'covering_physician', 'covered_physician', 'date', 'hours', 'daily_rate_override', 'notes']
+        fields = ['clinic', 'covering_physician', 'covered_physician', 'date', 'hours', 'hourly_rate_override', 'notes']
         widgets = {
             'clinic': forms.Select(attrs={'class': 'form-control'}),
             'covering_physician': forms.Select(attrs={'class': 'form-control'}),
             'covered_physician': forms.Select(attrs={'class': 'form-control'}),
             'date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'hours': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.25', 'min': '0', 'placeholder': '8.00'}),
-            'daily_rate_override': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'Leave blank to use standard rate'}),
+            'hourly_rate_override': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': 'Leave blank to use standard hourly rate'}),
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 

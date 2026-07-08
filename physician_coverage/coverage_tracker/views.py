@@ -11,7 +11,7 @@ import json
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
 
@@ -551,9 +551,15 @@ def edit_time_off(request, pk):
     old_status = req.status
 
     def prepare(form):
-        """Only approvers may change status; everyone else gets the field removed."""
+        """Only approvers may change status; everyone else gets the field removed.
+        Non-admins may only pick physicians inside their own scope (mirrors
+        add_time_off), so a request can't be reassigned across groups."""
         if not can_set_status:
             form.fields.pop('status', None)
+        if not (profile and profile.is_admin):
+            form.fields['physician'].queryset = form.fields['physician'].queryset.filter(
+                physician_type__in=_scope_types(profile)
+            )
         return form
 
     if request.method == 'POST':
@@ -676,9 +682,26 @@ def clinic_list(request):
         view_date = date.today()
 
     clinics = Clinic.objects.filter(is_active=True).prefetch_related('regular_physicians')
-    out_ids = TimeOffRequest.objects.filter(
-        status='approved', start_date__lte=view_date, end_date__gte=view_date
-    ).values_list('physician_id', flat=True)
+    # Map each out physician to their approved time-off request so the
+    # template can deep-link straight to that request's assignment page.
+    out_reqs = {
+        r.physician_id: r.pk
+        for r in TimeOffRequest.objects.filter(
+            status='approved', start_date__lte=view_date, end_date__gte=view_date
+        )
+    }
+    
+    out_ids = set(out_reqs)
+    # Physicians who already have locum coverage recorded for this date —
+    # they should no longer get an "assign" form, but other out physicians
+    # at the same clinic still should.
+    covered_today_ids = set(
+        CoverageAssignment.objects.filter(
+            date=view_date, no_coverage_needed=False,
+            covered_physician__isnull=False,
+        ).values_list('covered_physician_id', flat=True)
+    )
+
 
     clinic_data = []
     for clinic in clinics:
@@ -698,6 +721,12 @@ def clinic_list(request):
             'clinic': clinic,
             'assignments': assignments,
             'regular_out': regular_out,
+            # One link per out physician (NROC or PSA), straight to the
+            # assignment page for their time-off request.
+            'out_links': [
+                {'physician': p, 'req_pk': out_reqs[p.id]}
+                for p in regular_out if p.id not in covered_today_ids
+            ],
         })
 
     available_locums = Physician.objects.filter(
@@ -711,6 +740,74 @@ def clinic_list(request):
         'view_date': view_date,
         'available_locums': available_locums,
     })
+
+@admin_required
+def assign_day_coverage(request):
+    """Assign a locum to cover one physician for a single day, straight from
+    the clinics page. Works for both NROC and PSA physicians (records are
+    created directly, like the time-off assignment flow)."""
+    if request.method != 'POST':
+        return redirect('clinic_list')
+
+    date_str = request.POST.get('date', '')
+    try:
+        target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        messages.error(request, 'Invalid date.')
+        return redirect('clinic_list')
+
+    back = f'/clinics/?date={target_date}'
+
+    try:
+        clinic = Clinic.objects.get(pk=request.POST.get('clinic'), is_active=True)
+        physician = Physician.objects.get(
+            pk=request.POST.get('physician'), is_active=True,
+            physician_type__in=['regular', 'psa'])
+        locum = Physician.objects.get(
+            pk=request.POST.get('locum'), is_active=True, physician_type='locum')
+    except (Clinic.DoesNotExist, Physician.DoesNotExist, ValueError, TypeError):
+        messages.error(request, 'Could not assign coverage — invalid selection.')
+        return redirect(back)
+
+    try:
+        hours = Decimal(request.POST.get('hours', '').strip() or '8.00')
+        if hours < 0:
+            hours = Decimal('8.00')
+    except InvalidOperation:
+        hours = Decimal('8.00')
+
+    try:
+        with transaction.atomic():
+            existing = CoverageAssignment.objects.filter(
+                covered_physician=physician, date=target_date).first()
+            if existing:
+                existing.covering_physician = locum
+                existing.clinic = clinic
+                existing.hours = hours
+                existing.no_coverage_needed = False
+                existing.no_coverage_reason = ''
+                existing.save()
+            else:
+                CoverageAssignment.objects.create(
+                    clinic=clinic,
+                    covering_physician=locum,
+                    covered_physician=physician,
+                    date=target_date,
+                    hours=hours,
+                    notes=f'Single-day assignment from clinics page ({target_date})',
+                )
+    except IntegrityError:
+        messages.error(
+            request,
+            f'{locum} already has an assignment at {clinic.name} on '
+            f'{target_date:%b %d}. Pick a different locum.')
+        return redirect(back)
+
+    messages.success(
+        request,
+        f'{locum} assigned to cover {physician} at {clinic.name} on '
+        f'{target_date:%b %d, %Y}.')
+    return redirect(back)
 
 
 @admin_required
@@ -1563,6 +1660,9 @@ def edit_user(request, pk):
 def delete_user(request, pk):
     from django.contrib.auth.models import User as DjangoUser
     user = get_object_or_404(DjangoUser, pk=pk)
+    if request.method != 'POST':
+        # Never delete on GET (link prefetchers, typed URLs, etc.)
+        return redirect('user_management')
     if user == request.user:
         messages.error(request, "You cannot delete your own account.")
         return redirect('user_management')
@@ -1574,7 +1674,7 @@ def delete_user(request, pk):
 
 # ─── Change Password (all logged-in users) ───────────────────────────────────
 
-@login_required_custom
+@admin_required  
 def change_password(request):
     from django import forms as dj_forms
     from django.contrib.auth import update_session_auth_hash
