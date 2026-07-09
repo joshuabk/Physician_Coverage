@@ -54,7 +54,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Physician</th><th>Clinics</th><th>Used</th><th>Pending</th>{% if physician_type != 'psa' %}<th>Remaining</th><th>Progress</th>{% endif %}<th></th></tr>
+        <tr><th>Physician</th><th>Clinics</th><th>Used</th><th>Pending</th>{% if physician_type != 'psa' %}<th>Remaining</th><th>CME</th> <th>Progress</th>{% endif %}<th></th></tr>
       </thead>
       <tbody>
         {% for s in summaries %}
@@ -82,6 +82,10 @@
           <td>
             <span style="font-weight:500;color:{% if s.days_remaining <= 3 %}var(--red){% elif s.days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};font-family:'DM Mono',monospace;">{{ s.days_remaining }}</span>
             <span class="text-muted"> / {{ s.total }}</span>
+          </td>
+          <td>
+            <span style="font-weight:500;color:{% if s.cme_remaining <= 1 %}var(--red){% elif s.cme_remaining <= 2 %}var(--amber){% else %}var(--green){% endif %};font-family:'DM Mono',monospace;">{{ s.cme_remaining }}</span>
+            <span class="text-muted"> / {{ s.cme_total }}</span>
           </td>
           
           <td style="width:120px;">

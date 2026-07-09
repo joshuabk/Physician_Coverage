@@ -7,7 +7,7 @@ class PhysicianForm(forms.ModelForm):
     class Meta:
         model = Physician
         fields = ['first_name', 'last_name', 'email',  'physician_type',
-                  'total_vacation_days', 'hourly_rate', 'agency', 'is_active']
+                  'total_vacation_days','total_cme_days', 'hourly_rate', 'agency', 'is_active']
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'form-control'}),
             'last_name': forms.TextInput(attrs={'class': 'form-control'}),
@@ -15,6 +15,7 @@ class PhysicianForm(forms.ModelForm):
             
             'physician_type': forms.Select(attrs={'class': 'form-control'}),
             'total_vacation_days': forms.NumberInput(attrs={'class': 'form-control'}),
+            'total_cme_days': forms.NumberInput(attrs={'class': 'form-control'}),
             'hourly_rate': forms.NumberInput(attrs={
                 'class': 'form-control', 'step': '10.00',
                 'placeholder': '340.00',

@@ -70,6 +70,12 @@ class Physician(models.Model):
         default=20,
         help_text="Annual vacation day allocation (for NROC physicians)"
     )
+
+    total_cme_days = models.PositiveIntegerField(
+        default=5,
+        help_text="Annual CME / education day allocation"
+    )
+
     daily_rate = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
         help_text="Legacy / standard daily rate (kept for reference — hourly rate is used for pay)"
@@ -110,7 +116,7 @@ class Physician(models.Model):
             year = timezone.now().year
         total = 0
         for req in TimeOffRequest.objects.filter(physician=self, status='approved',
-                                                 request_type='vacation',
+                                                 request_type__in=['vacation', 'sick'],
                                                  start_date__year=year):
             total += req.duration_days
         return total
@@ -125,10 +131,37 @@ class Physician(models.Model):
             year = timezone.now().year
         total = 0
         for req in TimeOffRequest.objects.filter(physician=self, status='pending',
-                                                 request_type='vacation',
+                                                 request_type__in=['vacation', 'sick'],
                                                  start_date__year=year):
             total += req.duration_days
         return total
+    
+    # ---- CME / education day pool ----
+
+    def cme_days_taken(self, year=None):
+        """Approved CONFERENCE/CME leave charged in BUSINESS days."""
+        if year is None:
+            year = timezone.now().year
+        total = 0
+        for req in TimeOffRequest.objects.filter(physician=self, status='approved',
+                                                 request_type='conference',
+                                                 start_date__year=year):
+            total += req.duration_days
+        return total
+
+    def cme_days_pending(self, year=None):
+        """Pending CONFERENCE/CME leave in business days."""
+        if year is None:
+            year = timezone.now().year
+        total = 0
+        for req in TimeOffRequest.objects.filter(physician=self, status='pending',
+                                                 request_type='conference',
+                                                 start_date__year=year):
+            total += req.duration_days
+        return total
+
+    def cme_days_remaining(self, year=None):
+        return self.total_cme_days - self.cme_days_taken(year) 
 
     def total_coverage_days(self, year=None):
         if year is None:

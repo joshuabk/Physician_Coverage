@@ -39,6 +39,8 @@
   <div class="stat-card"><div class="stat-label">Days Used ({{ year }})</div><div class="stat-value" style="color:var(--amber);">{{ days_taken }}</div><div class="stat-sub">approved leave</div></div>
   <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value" style="color:var(--amber);">{{ days_pending }}</div><div class="stat-sub">awaiting approval</div></div>
   <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value" style="color:{% if days_remaining <= 3 %}var(--red){% elif days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};">{{ days_remaining }}</div><div class="stat-sub">days available</div></div>
+  <div class="stat-card"><div class="stat-label">CME Used ({{ year }})</div><div class="stat-value" style="color:var(--amber);">{{ cme_taken }}</div><div class="stat-sub">{% if cme_pending > 0 %}+ {{ cme_pending }} pending{% else %}approved CME{% endif %}</div></div>
+  <div class="stat-card"><div class="stat-label">CME Remaining</div><div class="stat-value" style="color:{% if cme_remaining <= 1 %}var(--red){% elif cme_remaining <= 2 %}var(--amber){% else %}var(--green){% endif %};">{{ cme_remaining }}</div><div class="stat-sub">of {{ physician.total_cme_days }} days</div></div>
 </div>
 {% if physician.total_vacation_days > 0 %}
 <div class="card" style="margin-bottom:1.25rem;">

@@ -113,6 +113,10 @@ def dashboard(request):
             'days_pending': p.days_pending(year),
             'days_remaining': p.days_remaining(year),
             'total': p.total_vacation_days,
+            'cme_taken': p.cme_days_taken(year),
+            'cme_pending': p.cme_days_pending(year),
+            'cme_remaining': p.cme_days_remaining(year),
+            'cme_total': p.total_cme_days,
         })
 
     # Locum cost summary for the year
@@ -167,6 +171,10 @@ def physician_list(request):
                 'days_remaining': p.days_remaining(year),
                 'total': p.total_vacation_days,
                 'clinics': p.assigned_clinics.filter(is_active=True),
+                'cme_taken': p.cme_days_taken(year),
+                'cme_pending': p.cme_days_pending(year),
+                'cme_remaining': p.cme_days_remaining(year),
+                'cme_total': p.total_cme_days,
             })
         elif p.is_psa:
             summaries.append({
@@ -175,6 +183,10 @@ def physician_list(request):
                 'days_pending': p.days_pending(year),
                 'days_remaining': p.days_remaining(year),
                 'total': p.total_vacation_days,
+                'cme_taken': p.cme_days_taken(year),
+                'cme_pending': p.cme_days_pending(year),
+                'cme_remaining': p.cme_days_remaining(year),
+                'cme_total': p.total_cme_days,
                 'clinics': p.assigned_clinics.filter(is_active=True),
                 'requested_days': p.requested_coverage_days(year),
             })
@@ -237,15 +249,16 @@ def physician_detail(request, pk):
     
     is_regular_like = physician.is_regular or physician.is_psa
 
-
     context = {
         'physician': physician,
         'year': year,
         'days_taken': physician.days_taken(year) if is_regular_like else None,
         'days_remaining': physician.days_remaining(year) if is_regular_like else None,
         'days_pending': physician.days_pending(year) if is_regular_like else None,
+        'cme_taken': physician.cme_days_taken(year) if is_regular_like else None,
+        'cme_remaining': physician.cme_days_remaining(year) if is_regular_like else None,
+        'cme_pending': physician.cme_days_pending(year) if is_regular_like else None,
         'coverage_hours': physician.total_coverage_hours(year) if physician.is_locum else None,
-        
         'coverage_cost': physician.total_coverage_cost(year) if physician.is_locum else None,
         'assigned_clinics': physician.assigned_clinics.all() if is_regular_like else [],
         'time_off_requests': time_off_requests,

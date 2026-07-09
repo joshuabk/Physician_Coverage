@@ -65,7 +65,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Physician</th><th>Used</th><th>Left</th><th></th></tr></thead>
+        <thead><tr><th>Physician</th><th>Used</th><th>Left</th><th>CME Left</th><th></th></tr></thead>
         <tbody>
           {% for s in physician_summaries %}
           <tr>
@@ -79,6 +79,11 @@
             <td>
               <span style="color:{% if s.days_remaining <= 3 %}var(--red){% elif s.days_remaining <= 7 %}var(--amber){% else %}var(--green){% endif %};font-weight:500;font-family:'DM Mono',monospace;">{{ s.days_remaining }}</span>
               <span class="text-muted"> / {{ s.total }}</span>
+            </td>
+            <td>
+              <span style="color:{% if s.cme_remaining <= 1 %}var(--red){% elif s.cme_remaining <= 2 %}var(--amber){% else %}var(--green){% endif %};font-weight:500;font-family:'DM Mono',monospace;">{{ s.cme_remaining }}</span>
+              <span class="text-muted"> / {{ s.cme_total }}</span>
+              {% if s.cme_pending > 0 %}<span class="badge badge-pending" style="margin-left:4px;">{{ s.cme_pending }}d pend.</span>{% endif %}
             </td>
             <td style="width:80px;">
               {% if s.total > 0 %}

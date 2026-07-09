@@ -74,6 +74,7 @@
     hourly_rate:         wrapperFor('id_hourly_rate'),
     agency:              wrapperFor('id_agency'),
     total_vacation_days: wrapperFor('id_total_vacation_days'),
+    total_cme_days:      wrapperFor('id_total_cme_days'),
   };
 
   function apply() {
@@ -81,6 +82,7 @@
     if (groups.hourly_rate)         groups.hourly_rate.style.display         = (t === 'locum') ? '' : 'none';
     if (groups.agency)              groups.agency.style.display              = (t === 'locum') ? '' : 'none';
     if (groups.total_vacation_days) groups.total_vacation_days.style.display = (t === 'locum' || t === 'psa') ? 'none' : '';
+    if (groups.total_cme_days)      groups.total_cme_days.style.display      = (t === 'locum') ? 'none' : '';
   }
 
   typeSelect.addEventListener('change', apply);
