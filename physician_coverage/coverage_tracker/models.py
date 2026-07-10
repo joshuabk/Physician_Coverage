@@ -53,6 +53,29 @@ def is_workday(d, holidays=None, extra_workdays=None):
         return True
     return d.weekday() < 5
 
+# ─── Fiscal year (vacation & CME pools reset every October 1) ────────────────
+
+FISCAL_YEAR_START_MONTH = 10  # October
+
+
+def fiscal_year_for(d):
+    """Fiscal year label for a date.
+
+    FY N runs Oct 1 of year N-1 through Sep 30 of year N.
+    e.g. Oct 1 2026 – Sep 30 2027 is FY2027, so on Oct 1 every physician's
+    used vacation/CME counts read as zero for the new fiscal year.
+    """
+    return d.year + 1 if d.month >= FISCAL_YEAR_START_MONTH else d.year
+
+
+def fiscal_year_range(year):
+    """Inclusive (start, end) dates of fiscal year `year`."""
+    return (date(year - 1, FISCAL_YEAR_START_MONTH, 1), date(year, 9, 30))
+
+
+def current_fiscal_year():
+    return fiscal_year_for(timezone.now().date())
+
 class Physician(models.Model):
     PHYSICIAN_TYPE_CHOICES = [
         ('regular', 'NROC Physician'),
@@ -108,60 +131,40 @@ class Physician(models.Model):
     def is_psa(self):
         return self.physician_type == 'psa'
 
-    def days_taken(self, year=None):
-        """Approved VACATION charged in BUSINESS days (matches
-        TimeOffRequest.duration_days). Sick, conference, personal, and other
-        leave types do not draw down the vacation allowance."""
-        if year is None:
-            year = timezone.now().year
+    def _pool_days(self, request_types, status, fiscal_year):
+        """Business days of matching requests charged to a fiscal year.
+
+        Pools reset every October 1: a request belongs to the fiscal year
+        containing its START date (FY N = Oct 1 of N-1 through Sep 30 of N).
+        """
+        if fiscal_year is None:
+            fiscal_year = current_fiscal_year()
+        fy_start, fy_end = fiscal_year_range(fiscal_year)
         total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='approved',
-                                                 request_type__in=['vacation', 'sick'],
-                                                 start_date__year=year):
+        for req in TimeOffRequest.objects.filter(physician=self, status=status,
+                                                 request_type__in=request_types,
+                                                 start_date__gte=fy_start,
+                                                 start_date__lte=fy_end):
             total += req.duration_days
         return total
+
+    def days_taken(self, year=None):
+        return self._pool_days(['vacation', 'sick'], 'approved', year)
 
     def days_remaining(self, year=None):
         return self.total_vacation_days - self.days_taken(year)
 
     def days_pending(self, year=None):
-        """Pending VACATION only, so it can be compared against the vacation
-        allowance consistently with days_taken."""
-        if year is None:
-            year = timezone.now().year
-        total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='pending',
-                                                 request_type__in=['vacation', 'sick'],
-                                                 start_date__year=year):
-            total += req.duration_days
-        return total
-    
-    # ---- CME / education day pool ----
+        return self._pool_days(['vacation', 'sick'], 'pending', year)
 
     def cme_days_taken(self, year=None):
-        """Approved CONFERENCE/CME leave charged in BUSINESS days."""
-        if year is None:
-            year = timezone.now().year
-        total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='approved',
-                                                 request_type='conference',
-                                                 start_date__year=year):
-            total += req.duration_days
-        return total
+        return self._pool_days(['conference'], 'approved', year)
 
     def cme_days_pending(self, year=None):
-        """Pending CONFERENCE/CME leave in business days."""
-        if year is None:
-            year = timezone.now().year
-        total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status='pending',
-                                                 request_type='conference',
-                                                 start_date__year=year):
-            total += req.duration_days
-        return total
+        return self._pool_days(['conference'], 'pending', year)
 
     def cme_days_remaining(self, year=None):
-        return self.total_cme_days - self.cme_days_taken(year) 
+        return self.total_cme_days - self.cme_days_taken(year)
 
     def total_coverage_days(self, year=None):
         if year is None:

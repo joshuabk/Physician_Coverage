@@ -37,12 +37,12 @@
   </div>
   {% if is_admin %}
   <div class="stat-card">
-    <div class="stat-label">{{ year }} Locum Hours</div>
+    <div class="stat-label">{{  cost_year }} Locum Hours</div>
     <div class="stat-value" style="color:var(--amber);">{{ total_locum_hours }}</div>
     <div class="stat-sub">total hours worked</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">{{ year }} Locum Cost</div>
+    <div class="stat-label">{{  cost_year }} Locum Cost</div>
     <div class="stat-value" style="color:var(--amber); font-size:20px;">${{ total_locum_cost|floatformat:0 }}</div>
     <div class="stat-sub">total spend</div>
   </div>
@@ -60,7 +60,7 @@
   <!-- Vacation balances -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>{{ year }} Vacation Balances — NROC Physicians</span>
+      <span>FY{{ year }} Vacation Balances — NROC Physicians <span class="text-muted text-sm" style="font-weight:400;">({{ fy_start|date:"M j, Y" }} – {{ fy_end|date:"M j, Y" }} · resets Oct 1)</span></span>
       <a href="/physicians/?type=regular&year={{ year }}" class="btn btn-ghost btn-sm">View all</a>
     </div>
     <div class="table-wrap">
@@ -105,8 +105,8 @@
   <!-- Locum cost summary -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>{{ year }} Locum Cost Summary</span>
-      <a href="/locum-costs/?year={{ year }}" class="btn btn-ghost btn-sm">Full report</a>
+      <span>{{  cost_year }} Locum Cost Summary</span>
+      <a href="/locum-costs/?year={{ cost_year}}" class="btn btn-ghost btn-sm">Full report</a>
     </div>
     <div class="table-wrap">
       <table>

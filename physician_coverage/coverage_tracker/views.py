@@ -32,7 +32,7 @@ from django.core.exceptions import ValidationError
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
     CoverageRequest, UserProfile, OnCallSchedule,
-    get_holidays, get_extra_workdays, is_workday,
+    get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, 
 )
 from .forms import (
     TimeOffRequestForm, CoverageAssignmentForm,
@@ -84,7 +84,11 @@ def _can_modify_time_off(profile, req):
 @admin_required
 def dashboard(request):
     today = date.today()
-    year = _int_param(request, 'year', today.year)
+    # Vacation/CME balances run on the fiscal year (Oct 1 - Sep 30, resets Oct 1)
+    year = _int_param(request, 'year', current_fiscal_year())
+    fy_start, fy_end = fiscal_year_range(year)
+    # Locum cost figures stay on the calendar year
+    cost_year = _int_param(request, 'cost_year', today.year)
 
     regular_physicians = Physician.objects.filter(is_active=True, physician_type='regular')
     locum_physicians = Physician.objects.filter(is_active=True, physician_type='locum')
@@ -124,8 +128,8 @@ def dashboard(request):
     total_locum_cost = Decimal('0.00')
     total_locum_hours = 0
     for p in locum_physicians:
-        hours = p.total_coverage_hours(year)
-        cost = p.total_coverage_cost(year)
+        hours = p.total_coverage_hours(cost_year)
+        cost = p.total_coverage_cost(cost_year)
         total_locum_cost += cost
         total_locum_hours += hours
         locum_summaries.append({
@@ -138,6 +142,9 @@ def dashboard(request):
 
     context = {
         'year': year,
+        'fy_start': fy_start,      
+        'fy_end': fy_end,         
+        'cost_year': cost_year,
         'today': today,
         'regular_physicians': regular_physicians,
         'locum_physicians': locum_physicians,
@@ -158,7 +165,7 @@ def dashboard(request):
 def physician_list(request):
     physician_type = request.GET.get('type', 'regular')
     sub_tab = request.GET.get('sub', 'list')  # 'list' or 'coverage_days' for PSA
-    year = _int_param(request, 'year', date.today().year)
+    year = _int_param(request, 'year', current_fiscal_year())
     physicians = Physician.objects.filter(is_active=True, physician_type=physician_type)
 
     summaries = []
@@ -233,7 +240,10 @@ def physician_list(request):
 @admin_required
 def physician_detail(request, pk):
     physician = get_object_or_404(Physician, pk=pk)
-    year = _int_param(request, 'year', date.today().year)
+    if physician.is_regular or physician.is_psa:
+        year = _int_param(request, 'year', current_fiscal_year())
+    else:
+        year = _int_param(request, 'year', date.today().year)
     time_off_requests = TimeOffRequest.objects.filter(physician=physician).order_by('-start_date')
     coverage = CoverageAssignment.objects.filter(
         covering_physician=physician
