@@ -31,12 +31,13 @@ from django.core.exceptions import ValidationError
 
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
-    CoverageRequest, UserProfile, OnCallSchedule,
+    CoverageRequest, UserProfile, OnCallSchedule, ClinicSchedule,
     get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, 
 )
 from .forms import (
     TimeOffRequestForm, CoverageAssignmentForm,
-    PhysicianAvailabilityForm, PhysicianForm, ClinicForm, OnCallScheduleForm
+    PhysicianAvailabilityForm, PhysicianForm, ClinicForm, OnCallScheduleForm,
+    WeeklyScheduleForm,
 )
 
 from .decorators import login_required_custom, admin_required, can_approve_required, clinic_access_required
@@ -84,7 +85,7 @@ def _can_modify_time_off(profile, req):
 @admin_required
 def dashboard(request):
     today = date.today()
-    # Vacation/CME balances run on the fiscal year (Oct 1 - Sep 30, resets Oct 1)
+    # Vacation/CME balances run on the fiscal year (Nov 1 - Oct 31, resets Nov 1)
     year = _int_param(request, 'year', current_fiscal_year())
     fy_start, fy_end = fiscal_year_range(year)
     # Locum cost figures stay on the calendar year
@@ -271,12 +272,38 @@ def physician_detail(request, pk):
         'coverage_hours': physician.total_coverage_hours(year) if physician.is_locum else None,
         'coverage_cost': physician.total_coverage_cost(year) if physician.is_locum else None,
         'assigned_clinics': physician.assigned_clinics.all() if is_regular_like else [],
+        'weekly_schedule': physician.weekly_schedule_display() if is_regular_like else [],
+        'has_weekly_schedule': physician.has_weekly_schedule() if is_regular_like else False,
         'time_off_requests': time_off_requests,
         'coverage': coverage[:20],
         'coverage_this_year': coverage_this_year,
         'availability': availability,
     }
     return render(request, 'coverage_tracker/physician_detail.html', context)
+
+
+@admin_required
+def physician_schedule(request, pk):
+    """Edit an NROC/PSA physician's recurring weekly clinic grid.
+
+    Each weekday has an AM slot and a PM slot, each of which can point at a
+    different clinic (or be left unscheduled), so half-day split assignments
+    like 'Monday morning at Midtown, Monday afternoon at Duluth' are supported.
+    """
+    physician = get_object_or_404(
+        Physician, pk=pk, physician_type__in=['regular', 'psa'])
+    if request.method == 'POST':
+        form = WeeklyScheduleForm(request.POST, physician=physician)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Weekly clinic schedule updated for {physician}.')
+            return redirect('physician_detail', pk=pk)
+    else:
+        form = WeeklyScheduleForm(physician=physician)
+    return render(request, 'coverage_tracker/physician_schedule.html', {
+        'physician': physician,
+        'form': form,
+    })
 
 
 @admin_required
@@ -705,6 +732,24 @@ def clinic_list(request):
         view_date = date.today()
 
     clinics = Clinic.objects.filter(is_active=True).prefetch_related('regular_physicians')
+
+    # ── Who works where today? ────────────────────────────────────────────
+    # Physicians with a weekly schedule are placed per (weekday, AM/PM) slot;
+    # physicians without one fall back to the legacy full-week clinic
+    # affiliation (Clinic.regular_physicians) and count as full days.
+    weekday = view_date.weekday()
+    schedule_managed_ids = set(
+        ClinicSchedule.objects.values_list('physician_id', flat=True)
+    )
+    today_slots = ClinicSchedule.objects.filter(
+        day_of_week=weekday, physician__is_active=True,
+    ).select_related('physician', 'clinic')
+    # clinic_id -> {physician: set of sessions at this clinic today}
+    clinic_sessions = {}
+    for slot in today_slots:
+        clinic_sessions.setdefault(slot.clinic_id, {}).setdefault(
+            slot.physician, set()).add(slot.session)
+
     # Map each out physician to their approved time-off request so the
     # template can deep-link straight to that request's assignment page.
     out_reqs = {
@@ -736,13 +781,30 @@ def clinic_list(request):
             date=view_date, no_coverage_needed=True
         ).values_list('covered_physician_id', flat=True)
         )
-        regular_out = [
-        p for p in clinic.regular_physicians.all()
-        if p.id in out_ids and p.id not in no_cov_physician_ids       # ← updated
-        ]
+        # Scheduled staff for this clinic today (half-day aware) …
+        staff_today = []
+        for p, sessions in clinic_sessions.get(clinic.id, {}).items():
+            staff_today.append({
+                'physician': p,
+                'label': 'Full day' if sessions >= {'am', 'pm'}
+                         else ('AM' if 'am' in sessions else 'PM'),
+                'is_out': p.id in out_ids and p.id not in no_cov_physician_ids,
+            })
+        # … plus legacy full-week physicians who have no weekly schedule yet.
+        for p in clinic.regular_physicians.all():
+            if p.id not in schedule_managed_ids and p.is_active:
+                staff_today.append({
+                    'physician': p,
+                    'label': 'Full day',
+                    'is_out': p.id in out_ids and p.id not in no_cov_physician_ids,
+                })
+        staff_today.sort(key=lambda s: (s['physician'].last_name,
+                                        s['physician'].first_name))
+        regular_out = [s['physician'] for s in staff_today if s['is_out']]
         clinic_data.append({
             'clinic': clinic,
             'assignments': assignments,
+            'staff_today': staff_today,
             'regular_out': regular_out,
             # One link per out physician (NROC or PSA), straight to the
             # assignment page for their time-off request.

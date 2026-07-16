@@ -53,16 +53,16 @@ def is_workday(d, holidays=None, extra_workdays=None):
         return True
     return d.weekday() < 5
 
-# ─── Fiscal year (vacation & CME pools reset every October 1) ────────────────
+# ─── Fiscal year (vacation & CME pools reset every November 1) ───────────────
 
-FISCAL_YEAR_START_MONTH = 10  # October
+FISCAL_YEAR_START_MONTH = 11  # November
 
 
 def fiscal_year_for(d):
     """Fiscal year label for a date.
 
-    FY N runs Oct 1 of year N-1 through Sep 30 of year N.
-    e.g. Oct 1 2026 – Sep 30 2027 is FY2027, so on Oct 1 every physician's
+    FY N runs Nov 1 of year N-1 through Oct 31 of year N.
+    e.g. Nov 1 2026 – Oct 31 2027 is FY2027, so on Nov 1 every physician's
     used vacation/CME counts read as zero for the new fiscal year.
     """
     return d.year + 1 if d.month >= FISCAL_YEAR_START_MONTH else d.year
@@ -70,7 +70,9 @@ def fiscal_year_for(d):
 
 def fiscal_year_range(year):
     """Inclusive (start, end) dates of fiscal year `year`."""
-    return (date(year - 1, FISCAL_YEAR_START_MONTH, 1), date(year, 9, 30))
+    start = date(year - 1, FISCAL_YEAR_START_MONTH, 1)
+    end = date(year, FISCAL_YEAR_START_MONTH, 1) - datetime.timedelta(days=1)
+    return (start, end)
 
 
 def current_fiscal_year():
@@ -134,8 +136,8 @@ class Physician(models.Model):
     def _pool_days(self, request_types, status, fiscal_year):
         """Business days of matching requests charged to a fiscal year.
 
-        Pools reset every October 1: a request belongs to the fiscal year
-        containing its START date (FY N = Oct 1 of N-1 through Sep 30 of N).
+        Pools reset every November 1: a request belongs to the fiscal year
+        containing its START date (FY N = Nov 1 of N-1 through Oct 31 of N).
         """
         if fiscal_year is None:
             fiscal_year = current_fiscal_year()
@@ -200,6 +202,21 @@ class Physician(models.Model):
         return CoverageRequest.objects.filter(physician=self, requested_date__year=year).count()
 
 
+    def has_weekly_schedule(self):
+        """True once this physician's clinics are managed by the weekly grid."""
+        return self.clinic_schedule.exists()
+
+    def weekly_schedule_display(self):
+        """Template-friendly grid: [{'day': 'Monday', 'am': row|None, 'pm': row|None}, ...]"""
+        grid = {day: {'am': None, 'pm': None} for day, _ in ClinicSchedule.DAY_CHOICES}
+        for row in self.clinic_schedule.select_related('clinic'):
+            grid[row.day_of_week][row.session] = row
+        return [
+            {'day': name, 'am': grid[day]['am'], 'pm': grid[day]['pm']}
+            for day, name in ClinicSchedule.DAY_CHOICES
+        ]
+
+
 class Clinic(models.Model):
     name = models.CharField(max_length=200)
     location = models.CharField(max_length=200, blank=True)
@@ -218,6 +235,53 @@ class Clinic(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class ClinicSchedule(models.Model):
+    """Recurring weekly clinic assignment for NROC/PSA physicians.
+
+    One row = one half-day: e.g. Dr. X, Monday, AM, Clinic A. A full day at
+    one clinic is simply two rows (AM + PM) pointing at the same clinic, so a
+    physician can spend the morning at one clinic and the afternoon at another.
+    A physician can hold at most one clinic per (day, session).
+    """
+    DAY_CHOICES = [
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+    ]
+    SESSION_CHOICES = [
+        ('am', 'Morning'),
+        ('pm', 'Afternoon'),
+    ]
+
+    physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='clinic_schedule',
+        limit_choices_to={'physician_type__in': ['regular', 'psa']},
+    )
+    clinic = models.ForeignKey(
+        Clinic, on_delete=models.CASCADE, related_name='weekly_schedule',
+    )
+    day_of_week = models.PositiveSmallIntegerField(
+        choices=DAY_CHOICES,
+        help_text="Weekday (matches Python date.weekday(): Monday=0)",
+    )
+    session = models.CharField(max_length=2, choices=SESSION_CHOICES)
+
+    class Meta:
+        ordering = ['physician', 'day_of_week', 'session']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['physician', 'day_of_week', 'session'],
+                name='one_clinic_per_physician_half_day',
+            ),
+        ]
+
+    def __str__(self):
+        return (f"{self.physician} — {self.get_day_of_week_display()} "
+                f"{self.get_session_display()} @ {self.clinic}")
 
 
 class TimeOffRequest(models.Model):

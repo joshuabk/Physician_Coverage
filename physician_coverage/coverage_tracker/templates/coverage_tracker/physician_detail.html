@@ -90,17 +90,40 @@
     </div>
   </div>
 
-  <!-- Assigned clinics -->
+  <!-- Weekly clinic schedule -->
   <div class="card">
-    <div class="card-title">Assigned Clinics</div>
+    <div class="flex items-center" style="justify-content:space-between;">
+      <div class="card-title">Weekly Clinic Schedule</div>
+      {% if request.user.profile.is_admin %}
+      <a href="/physicians/{{ physician.pk }}/schedule/" class="btn btn-ghost btn-sm">Edit Schedule</a>
+      {% endif %}
+    </div>
+    {% if has_weekly_schedule %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Day</th><th>Morning</th><th>Afternoon</th></tr></thead>
+        <tbody>
+          {% for row in weekly_schedule %}
+          <tr>
+            <td style="font-weight:500;">{{ row.day }}</td>
+            <td>{% if row.am %}{{ row.am.clinic.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            <td>{% if row.pm %}{{ row.pm.clinic.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     {% for clinic in assigned_clinics %}
     <div style="padding:8px 0;border-bottom:1px solid var(--border);">
       <div style="font-weight:500;font-size:13.5px;">{{ clinic.name }}</div>
       {% if clinic.location %}<div class="text-muted text-sm">{{ clinic.location }}</div>{% endif %}
+      <div class="text-muted text-sm">All week (no day/half-day schedule set)</div>
     </div>
     {% empty %}
-    <div class="empty-state">Not assigned to any clinics. <a href="/clinics/add/" style="color:var(--teal);">Edit a clinic</a> to assign.</div>
+    <div class="empty-state">No clinic schedule. {% if request.user.profile.is_admin %}<a href="/physicians/{{ physician.pk }}/schedule/" style="color:var(--teal);">Set weekly schedule</a>.{% endif %}</div>
     {% endfor %}
+    {% endif %}
   </div>
 
   {% else %}

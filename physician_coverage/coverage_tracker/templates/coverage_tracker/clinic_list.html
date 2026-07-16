@@ -40,14 +40,15 @@
           </div>
         </div>
         <div class="clinic-card-body">
-          <!-- Regular physicians -->
-          {% if item.clinic.regular_physicians.all %}
+          <!-- Physicians scheduled today (half-day aware) -->
+          {% if item.staff_today %}
           <div style="margin-bottom:10px;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Regular Staff</div>
-            {% for p in item.clinic.regular_physicians.all %}
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Scheduled Today</div>
+            {% for s in item.staff_today %}
               <div class="flex items-center gap-2" style="padding:4px 0;">
-                <div class="doc-tag {% if p.is_psa %}doc-tag-psa{% endif %}">{{ p }}</div>
-                {% if p in item.regular_out %}
+                <div class="doc-tag {% if s.physician.is_psa %}doc-tag-psa{% endif %}">{{ s.physician }}</div>
+                <span class="badge" style="background:var(--bg-3);color:var(--text-2);">{{ s.label }}</span>
+                {% if s.is_out %}
                   <span class="badge badge-off">Out today</span>
                 {% else %}
                   <span class="badge badge-available">Present</span>
@@ -119,8 +120,8 @@
             {% endfor %}
           </div>
           {% endif %}
-          {% if not item.clinic.regular_physicians.all and not item.assignments %}
-            <div class="empty-state">No physicians assigned. {% if request.user.profile.is_admin %} <a href="/clinics/{{ item.clinic.pk }}/edit/" style="color:var(--teal);">Edit clinic</a>.{% endif %}</div>
+          {% if not item.staff_today and not item.assignments %}
+            <div class="empty-state">No physicians scheduled today. {% if request.user.profile.is_admin %} <a href="/clinics/{{ item.clinic.pk }}/edit/" style="color:var(--teal);">Edit clinic</a> or set a physician's weekly schedule.{% endif %}</div>
           {% endif %}
         </div>
       </div>

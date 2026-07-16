@@ -3,7 +3,8 @@ from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment,
-    PhysicianAvailability, CoverageRequest, UserProfile, OnCallSchedule
+    PhysicianAvailability, CoverageRequest, UserProfile, OnCallSchedule,
+    ClinicSchedule,
 )
 
 
@@ -62,6 +63,14 @@ class PhysicianAdmin(admin.ModelAdmin):
 class ClinicAdmin(admin.ModelAdmin):
     list_display = ['name', 'location', 'is_active']
     filter_horizontal = ['regular_physicians']
+
+
+# ── ClinicSchedule (weekly half-day grid) ─────────────────────────────────────
+@admin.register(ClinicSchedule)
+class ClinicScheduleAdmin(admin.ModelAdmin):
+    list_display = ['physician', 'day_of_week', 'session', 'clinic']
+    list_filter = ['day_of_week', 'session', 'clinic']
+    search_fields = ['physician__first_name', 'physician__last_name', 'clinic__name']
 
 
 # ── TimeOffRequest ────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.test import TestCase, Client
 
 from .models import (
@@ -635,7 +636,7 @@ class UserManagementTests(TestCase):
 
 
 class FiscalYearTests(TestCase):
-    """Pools reset every October 1: FY N = Oct 1 (N-1) through Sep 30 (N)."""
+    """Pools reset every November 1: FY N = Nov 1 (N-1) through Oct 31 (N)."""
 
     def setUp(self):
         from .models import fiscal_year_for, fiscal_year_range
@@ -651,32 +652,32 @@ class FiscalYearTests(TestCase):
             start_date=start, end_date=end)
 
     def test_fiscal_year_label_boundaries(self):
-        self.assertEqual(self.fy_for(date(2026, 9, 30)), 2026)  # last day of FY2026
-        self.assertEqual(self.fy_for(date(2026, 10, 1)), 2027)  # reset day
+        self.assertEqual(self.fy_for(date(2026, 10, 31)), 2026)  # last day of FY2026
+        self.assertEqual(self.fy_for(date(2026, 11, 1)), 2027)   # reset day
         self.assertEqual(self.fy_for(date(2026, 7, 10)), 2026)
         self.assertEqual(self.fy_for(date(2027, 1, 15)), 2027)
 
     def test_fiscal_year_range(self):
         self.assertEqual(self.fy_range(2027),
-                         (date(2026, 10, 1), date(2027, 9, 30)))
+                         (date(2026, 11, 1), date(2027, 10, 31)))
 
-    def test_vacation_resets_on_oct_1(self):
+    def test_vacation_resets_on_nov_1(self):
         # 3 vacation days in August 2026 -> FY2026
         self._req('vacation', date(2026, 8, 3), date(2026, 8, 5))
-        # 2 vacation days in October 2026 -> FY2027 (after the reset)
-        self._req('vacation', date(2026, 10, 5), date(2026, 10, 6))
+        # 2 vacation days in November 2026 -> FY2027 (after the reset)
+        self._req('vacation', date(2026, 11, 2), date(2026, 11, 3))
         self.assertEqual(self.p.days_taken(2026), 3)
         self.assertEqual(self.p.days_remaining(2026), 17)
         self.assertEqual(self.p.days_taken(2027), 2)   # only post-reset days
         self.assertEqual(self.p.days_remaining(2027), 18)
 
     def test_sick_resets_too(self):
-        self._req('sick', date(2026, 9, 28), date(2026, 9, 29))  # FY2026
-        self._req('sick', date(2026, 10, 1), date(2026, 10, 1))  # FY2027 day one
+        self._req('sick', date(2026, 10, 29), date(2026, 10, 30))  # FY2026
+        self._req('sick', date(2026, 11, 2), date(2026, 11, 2))    # FY2027 (Nov 1 is a Sunday; Mon Nov 2 is the first workday)
         self.assertEqual(self.p.days_taken(2026), 2)
         self.assertEqual(self.p.days_taken(2027), 1)
 
-    def test_cme_resets_on_oct_1(self):
+    def test_cme_resets_on_nov_1(self):
         self._req('conference', date(2026, 9, 14), date(2026, 9, 16))  # FY2026: 3
         self._req('conference', date(2026, 11, 2), date(2026, 11, 3))  # FY2027: 2
         self.assertEqual(self.p.cme_days_taken(2026), 3)
@@ -684,16 +685,16 @@ class FiscalYearTests(TestCase):
         self.assertEqual(self.p.cme_days_taken(2027), 2)
         self.assertEqual(self.p.cme_days_remaining(2027), 3)  # fresh 5-day pool
 
-    def test_sep_30_vs_oct_1_split(self):
-        self._req('vacation', date(2026, 9, 30), date(2026, 9, 30))  # Wed, FY2026
-        self._req('vacation', date(2026, 10, 1), date(2026, 10, 1))  # Thu, FY2027
+    def test_oct_30_vs_nov_2_split(self):
+        self._req('vacation', date(2026, 10, 30), date(2026, 10, 30))  # Fri, FY2026
+        self._req('vacation', date(2026, 11, 2), date(2026, 11, 2))    # Mon, FY2027
         self.assertEqual(self.p.days_taken(2026), 1)
         self.assertEqual(self.p.days_taken(2027), 1)
 
     def test_request_spanning_reset_charges_to_start_fy(self):
-        # Mon Sep 28 - Fri Oct 2 2026 spans the reset; whole request charges
-        # to FY2026 because it STARTS before Oct 1 (start-date rule).
-        r = self._req('vacation', date(2026, 9, 28), date(2026, 10, 2))
+        # Wed Oct 28 - Tue Nov 3 2026 spans the reset; whole request charges
+        # to FY2026 because it STARTS before Nov 1 (start-date rule).
+        r = self._req('vacation', date(2026, 10, 28), date(2026, 11, 3))
         self.assertEqual(r.duration_days, 5)
         self.assertEqual(self.p.days_taken(2026), 5)
         self.assertEqual(self.p.days_taken(2027), 0)
@@ -708,7 +709,7 @@ class FiscalYearTests(TestCase):
         self.assertEqual(self.p.days_remaining(), 19)
 
     def test_pending_uses_fiscal_year(self):
-        self._req('vacation', date(2026, 10, 5), date(2026, 10, 6),
+        self._req('vacation', date(2026, 11, 2), date(2026, 11, 3),
                   status='pending')
         self.assertEqual(self.p.days_pending(2026), 0)
         self.assertEqual(self.p.days_pending(2027), 2)
@@ -720,9 +721,9 @@ class FiscalYearTests(TestCase):
         r = c.get('/')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.context['year'], 2026)  # FY2026 in July 2026
-        self.assertEqual(r.context['fy_start'], date(2025, 10, 1))
-        self.assertEqual(r.context['fy_end'], date(2026, 9, 30))
-        self.assertContains(r, 'resets Oct 1')
+        self.assertEqual(r.context['fy_start'], date(2025, 11, 1))
+        self.assertEqual(r.context['fy_end'], date(2026, 10, 31))
+        self.assertContains(r, 'resets Nov 1')
 
     def test_dashboard_next_fiscal_year_shows_reset_balances(self):
         self._req('vacation', date(2026, 8, 3), date(2026, 8, 7))  # 5d in FY2026
@@ -737,3 +738,139 @@ class FiscalYearTests(TestCase):
         self.assertEqual(s27['days_taken'], 0)          # reset!
         self.assertEqual(s27['days_remaining'], 20)
         self.assertEqual(s27['cme_remaining'], 5)
+
+
+class ClinicScheduleTests(TestCase):
+    """Per-weekday, half-day clinic assignments for NROC/PSA physicians."""
+
+    MONDAY = date(2026, 7, 13)
+    TUESDAY = date(2026, 7, 14)
+
+    def setUp(self):
+        from .models import ClinicSchedule
+        self.ClinicSchedule = ClinicSchedule
+        self.clinic_a = Clinic.objects.create(name='Alpharetta')
+        self.clinic_b = Clinic.objects.create(name='Buckhead')
+        self.nroc = Physician.objects.create(
+            first_name='Nina', last_name='Roc', email='nr@x.com',
+            physician_type='regular')
+        self.psa = Physician.objects.create(
+            first_name='Pat', last_name='Sa', email='ps@x.com',
+            physician_type='psa')
+        self.admin = make_user('schedboss', role='admin', superuser=True)
+        self.client_ = Client()
+        self.client_.force_login(self.admin)
+
+    def _slot(self, physician, clinic, day, session):
+        return self.ClinicSchedule.objects.create(
+            physician=physician, clinic=clinic, day_of_week=day, session=session)
+
+    def test_half_day_split_shows_both_clinics(self):
+        # Monday: AM at Alpharetta, PM at Buckhead
+        self._slot(self.nroc, self.clinic_a, 0, 'am')
+        self._slot(self.nroc, self.clinic_b, 0, 'pm')
+        r = self.client_.get(f'/clinics/?date={self.MONDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        a_staff = {(s['physician'].pk, s['label']) for s in data['Alpharetta']['staff_today']}
+        b_staff = {(s['physician'].pk, s['label']) for s in data['Buckhead']['staff_today']}
+        self.assertIn((self.nroc.pk, 'AM'), a_staff)
+        self.assertIn((self.nroc.pk, 'PM'), b_staff)
+
+    def test_full_day_label_when_both_sessions_same_clinic(self):
+        self._slot(self.psa, self.clinic_a, 0, 'am')
+        self._slot(self.psa, self.clinic_a, 0, 'pm')
+        r = self.client_.get(f'/clinics/?date={self.MONDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        labels = {s['physician'].pk: s['label'] for s in data['Alpharetta']['staff_today']}
+        self.assertEqual(labels[self.psa.pk], 'Full day')
+
+    def test_not_shown_on_unscheduled_day(self):
+        self._slot(self.nroc, self.clinic_a, 0, 'am')  # Monday only
+        r = self.client_.get(f'/clinics/?date={self.TUESDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        pks = {s['physician'].pk for s in data['Alpharetta']['staff_today']}
+        self.assertNotIn(self.nroc.pk, pks)
+
+    def test_out_flag_follows_schedule(self):
+        self._slot(self.nroc, self.clinic_a, 0, 'am')
+        self._slot(self.nroc, self.clinic_b, 0, 'pm')
+        TimeOffRequest.objects.create(
+            physician=self.nroc, status='approved', request_type='vacation',
+            start_date=self.MONDAY, end_date=self.MONDAY)
+        r = self.client_.get(f'/clinics/?date={self.MONDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        # Marked out at both clinics they were scheduled at that day
+        self.assertIn(self.nroc, data['Alpharetta']['regular_out'])
+        self.assertIn(self.nroc, data['Buckhead']['regular_out'])
+
+    def test_legacy_m2m_fallback_full_day(self):
+        # No weekly schedule rows -> legacy clinic affiliation still shows
+        self.clinic_a.regular_physicians.add(self.nroc)
+        r = self.client_.get(f'/clinics/?date={self.TUESDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        labels = {s['physician'].pk: s['label'] for s in data['Alpharetta']['staff_today']}
+        self.assertEqual(labels[self.nroc.pk], 'Full day')
+
+    def test_schedule_supersedes_legacy_m2m(self):
+        # Once a physician has any schedule rows, the M2M no longer places
+        # them everywhere all week.
+        self.clinic_a.regular_physicians.add(self.nroc)
+        self._slot(self.nroc, self.clinic_b, 1, 'am')  # Tuesday AM at B only
+        r = self.client_.get(f'/clinics/?date={self.TUESDAY}')
+        data = {item['clinic'].name: item for item in r.context['clinic_data']}
+        a_pks = {s['physician'].pk for s in data['Alpharetta']['staff_today']}
+        b_pks = {s['physician'].pk for s in data['Buckhead']['staff_today']}
+        self.assertNotIn(self.nroc.pk, a_pks)
+        self.assertIn(self.nroc.pk, b_pks)
+
+    def test_unique_constraint_one_clinic_per_half_day(self):
+        self._slot(self.nroc, self.clinic_a, 0, 'am')
+        with self.assertRaises(IntegrityError):
+            self._slot(self.nroc, self.clinic_b, 0, 'am')
+
+    def test_editor_saves_grid_and_syncs_m2m(self):
+        r = self.client_.post(f'/physicians/{self.nroc.pk}/schedule/', {
+            'd0_am': self.clinic_a.pk,   # Mon AM  -> A
+            'd0_pm': self.clinic_b.pk,   # Mon PM  -> B (split day)
+            'd1_am': self.clinic_a.pk,   # Tue AM  -> A
+            'd1_pm': self.clinic_a.pk,   # Tue PM  -> A (full day)
+        })
+        self.assertEqual(r.status_code, 302)
+        rows = self.ClinicSchedule.objects.filter(physician=self.nroc)
+        self.assertEqual(rows.count(), 4)
+        self.assertEqual(
+            set(self.nroc.assigned_clinics.all()), {self.clinic_a, self.clinic_b})
+        # Re-saving replaces the schedule (and re-syncs the M2M)
+        r = self.client_.post(f'/physicians/{self.nroc.pk}/schedule/', {
+            'd2_am': self.clinic_b.pk,
+        })
+        self.assertEqual(r.status_code, 302)
+        rows = self.ClinicSchedule.objects.filter(physician=self.nroc)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().day_of_week, 2)
+        self.assertEqual(set(self.nroc.assigned_clinics.all()), {self.clinic_b})
+
+    def test_editor_rejects_locums(self):
+        locum = Physician.objects.create(
+            first_name='Lo', last_name='Cum', email='lc@x.com',
+            physician_type='locum')
+        r = self.client_.get(f'/physicians/{locum.pk}/schedule/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_editor_requires_admin(self):
+        phys_user = make_user('plainsched', role='physician', scope='nroc')
+        c2 = Client()
+        c2.force_login(phys_user)
+        r = c2.get(f'/physicians/{self.nroc.pk}/schedule/')
+        self.assertEqual(r.status_code, 302)  # bounced
+
+    def test_detail_page_shows_schedule(self):
+        self._slot(self.nroc, self.clinic_a, 0, 'am')
+        self._slot(self.nroc, self.clinic_b, 0, 'pm')
+        r = self.client_.get(f'/physicians/{self.nroc.pk}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context['has_weekly_schedule'])
+        monday = r.context['weekly_schedule'][0]
+        self.assertEqual(monday['day'], 'Monday')
+        self.assertEqual(monday['am'].clinic, self.clinic_a)
+        self.assertEqual(monday['pm'].clinic, self.clinic_b)

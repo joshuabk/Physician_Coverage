@@ -1,6 +1,57 @@
 from django import forms
 from decimal import Decimal
-from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability, OnCallSchedule
+from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability, OnCallSchedule, ClinicSchedule
+
+
+class WeeklyScheduleForm(forms.Form):
+    """Weekly clinic grid for one NROC/PSA physician.
+
+    One clinic dropdown per (weekday, half-day) slot — 5 days x AM/PM. Leaving
+    a slot blank means the physician is not scheduled at any clinic then.
+    Saving replaces the physician's entire weekly schedule and keeps the
+    legacy Clinic.regular_physicians affiliation in sync.
+    """
+
+    def __init__(self, *args, physician=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.physician = physician
+        clinics = Clinic.objects.filter(is_active=True).order_by('name')
+        for day, _day_name in ClinicSchedule.DAY_CHOICES:
+            for session, _session_name in ClinicSchedule.SESSION_CHOICES:
+                self.fields[f'd{day}_{session}'] = forms.ModelChoiceField(
+                    queryset=clinics, required=False,
+                    empty_label='— Not scheduled —',
+                    widget=forms.Select(attrs={'class': 'form-control'}),
+                )
+        if physician is not None and not self.is_bound:
+            for row in physician.clinic_schedule.all():
+                field = self.fields.get(f'd{row.day_of_week}_{row.session}')
+                if field is not None:
+                    field.initial = row.clinic_id
+
+    def day_rows(self):
+        """[(day_name, am_field, pm_field)] for rendering the grid."""
+        return [
+            (day_name, self[f'd{day}_am'], self[f'd{day}_pm'])
+            for day, day_name in ClinicSchedule.DAY_CHOICES
+        ]
+
+    def save(self):
+        ClinicSchedule.objects.filter(physician=self.physician).delete()
+        rows = []
+        for day, _ in ClinicSchedule.DAY_CHOICES:
+            for session, _ in ClinicSchedule.SESSION_CHOICES:
+                clinic = self.cleaned_data.get(f'd{day}_{session}')
+                if clinic:
+                    rows.append(ClinicSchedule(
+                        physician=self.physician, clinic=clinic,
+                        day_of_week=day, session=session,
+                    ))
+        ClinicSchedule.objects.bulk_create(rows)
+        # Keep the legacy "assigned clinics" affiliation in sync so existing
+        # views (physician list, time-off assignment, clinic form) stay correct.
+        self.physician.assigned_clinics.set({r.clinic for r in rows})
+        return rows
 
 
 class PhysicianForm(forms.ModelForm):

@@ -1,0 +1,61 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Weekly Schedule — {{ physician }} — PhysicianCoverage{% endblock %}
+
+{% block content %}
+<div style="max-width: 720px;">
+  <div class="page-header">
+    <div>
+      <h1>Weekly Clinic Schedule</h1>
+      <p class="text-muted text-sm mt-1">
+        {{ physician }} — pick a clinic for each half day. Use the same clinic
+        for AM and PM for a full day, different clinics for a split day, or
+        leave a slot unscheduled.
+      </p>
+    </div>
+    <a href="/physicians/{{ physician.pk }}/" class="btn btn-ghost">← Back</a>
+  </div>
+
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:120px;">Day</th>
+              <th>Morning (AM)</th>
+              <th>Afternoon (PM)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for day_name, am_field, pm_field in form.day_rows %}
+            <tr>
+              <td style="font-weight:500;">{{ day_name }}</td>
+              <td>
+                {{ am_field }}
+                {% for err in am_field.errors %}<div style="color:var(--red);font-size:12px;margin-top:4px;">{{ err }}</div>{% endfor %}
+              </td>
+              <td>
+                {{ pm_field }}
+                {% for err in pm_field.errors %}<div style="color:var(--red);font-size:12px;margin-top:4px;">{{ err }}</div>{% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if form.non_field_errors %}
+        {% for err in form.non_field_errors %}
+          <div style="color:var(--red); font-size:13px; margin:12px 0; padding:8px 12px; background:rgba(224,84,84,0.1); border-radius:6px;">{{ err }}</div>
+        {% endfor %}
+      {% endif %}
+
+      <div class="flex gap-2" style="margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Save Schedule</button>
+        <a href="/physicians/{{ physician.pk }}/" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
