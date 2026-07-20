@@ -32,8 +32,10 @@ from django.core.exceptions import ValidationError
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
     CoverageRequest, UserProfile, OnCallSchedule, ClinicSchedule,
-    get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, 
+    get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, fiscal_year_range, 
+    current_locum_fiscal_year, locum_fiscal_year_range,
 )
+
 from .forms import (
     TimeOffRequestForm, CoverageAssignmentForm,
     PhysicianAvailabilityForm, PhysicianForm, ClinicForm, OnCallScheduleForm,
@@ -89,7 +91,7 @@ def dashboard(request):
     year = _int_param(request, 'year', current_fiscal_year())
     fy_start, fy_end = fiscal_year_range(year)
     # Locum cost figures stay on the calendar year
-    cost_year = _int_param(request, 'cost_year', today.year)
+    cost_year = _int_param(request, 'cost_year', current_locum_fiscal_year())
 
     regular_physicians = Physician.objects.filter(is_active=True, physician_type='regular')
     locum_physicians = Physician.objects.filter(is_active=True, physician_type='locum')
@@ -166,7 +168,11 @@ def dashboard(request):
 def physician_list(request):
     physician_type = request.GET.get('type', 'regular')
     sub_tab = request.GET.get('sub', 'list')  # 'list' or 'coverage_days' for PSA
-    year = _int_param(request, 'year', current_fiscal_year())
+    if physician_type == 'locum':
+        # Locum cost totals run on the locum fiscal year (Oct 1 - Sep 30)
+        year = _int_param(request, 'year', current_locum_fiscal_year())
+    else:
+        year = _int_param(request, 'year', current_fiscal_year())
     physicians = Physician.objects.filter(is_active=True, physician_type=physician_type)
 
     summaries = []
@@ -207,6 +213,8 @@ def physician_list(request):
                 'clinics': [],
             })
 
+         
+
     # For PSA coverage_days sub-tab, gather per-physician coverage request data
     psa_coverage_data = []
     if physician_type == 'psa' and sub_tab == 'coverage_days':
@@ -244,7 +252,8 @@ def physician_detail(request, pk):
     if physician.is_regular or physician.is_psa:
         year = _int_param(request, 'year', current_fiscal_year())
     else:
-        year = _int_param(request, 'year', date.today().year)
+        # Locum cost totals run on the locum fiscal year (Oct 1 - Sep 30)
+        year = _int_param(request, 'year', current_locum_fiscal_year())
     time_off_requests = TimeOffRequest.objects.filter(physician=physician).order_by('-start_date')
     coverage = CoverageAssignment.objects.filter(
         covering_physician=physician
@@ -254,8 +263,11 @@ def physician_detail(request, pk):
     ).order_by('date')[:30]
 
     # Cost breakdown for locums
+    # Cost breakdown for locums (locum fiscal year: Oct 1 - Sep 30)
+    locum_fy_start, locum_fy_end = locum_fiscal_year_range(year)
     coverage_this_year = CoverageAssignment.objects.filter(
-        covering_physician=physician, date__year=year
+        covering_physician=physician,
+        date__gte=locum_fy_start, date__lte=locum_fy_end,
     ).select_related('clinic')
     
     is_regular_like = physician.is_regular or physician.is_psa
@@ -955,11 +967,15 @@ def delete_coverage(request, pk):
 
 @admin_required
 def locum_costs(request):
-    year = _int_param(request, 'year', date.today().year)
+    
+    # Locum costs run on the locum fiscal year: Oct 1 - Sep 30, labeled by the
+    # year it ends (FY2026 = Oct 1 2025 - Sep 30 2026). Totals reset every 10/1.
+    year = _int_param(request, 'year', current_locum_fiscal_year())
     month = _int_param(request, 'month', 0)  # 0 = no month filter
+    fy_start, fy_end = locum_fiscal_year_range(year)
 
     assignments = CoverageAssignment.objects.filter(
-        date__year=year, no_coverage_needed=False
+        date__gte=fy_start, date__lte=fy_end, no_coverage_needed=False
     ).select_related('covering_physician', 'clinic', 'covered_physician')
 
     if month:
@@ -991,8 +1007,11 @@ def locum_costs(request):
         })
 
     # Monthly breakdown
+    # Monthly breakdown (fiscal year order: Oct ... Sep)
     monthly_totals = {}
-    for a in CoverageAssignment.objects.filter(date__year=year).select_related('covering_physician'):
+    for a in CoverageAssignment.objects.filter(
+        date__gte=fy_start, date__lte=fy_end
+    ).select_related('covering_physician'):
         if a.no_coverage_needed or a.covering_physician is None:          # ← guard
             continue
         m = a.date.month
@@ -1003,7 +1022,8 @@ def locum_costs(request):
 
     months = []
     month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-    for i in range(1, 13):
+    fiscal_month_order = [10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    for i in fiscal_month_order:
         d = monthly_totals.get(i, {'hours': Decimal('0.00'), 'cost': Decimal('0.00')})
         months.append({'num': i, 'name': month_names[i-1], **d})
     #num_assigned = 0
@@ -1165,7 +1185,7 @@ def approved_time_off_coverage(request):
     approved_requests = TimeOffRequest.objects.filter(
         status='approved',
         start_date__year=year,
-    ).select_related('physician').order_by('start_date')
+    ).select_related('physician').order_by('-start_date')
 
     enriched = []
     for req in approved_requests:

@@ -78,6 +78,31 @@ def fiscal_year_range(year):
 def current_fiscal_year():
     return fiscal_year_for(timezone.now().date())
 
+# ─── Locum-cost fiscal year (cost totals reset every October 1; FY ends 9/30) ─
+
+LOCUM_FY_START_MONTH = 10  # October
+
+
+def locum_fiscal_year_for(d):
+    """Locum-cost fiscal year label for a date.
+
+    FY N runs Oct 1 of year N-1 through Sep 30 of year N.
+    e.g. Oct 1 2025 – Sep 30 2026 is FY2026, so on Oct 1 every locum's
+    hours/cost totals read as zero for the new fiscal year.
+    """
+    return d.year + 1 if d.month >= LOCUM_FY_START_MONTH else d.year
+
+
+def locum_fiscal_year_range(year):
+    """Inclusive (start, end) dates of locum-cost fiscal year `year`."""
+    start = date(year - 1, LOCUM_FY_START_MONTH, 1)
+    end = date(year, LOCUM_FY_START_MONTH, 1) - datetime.timedelta(days=1)
+    return (start, end)
+
+
+def current_locum_fiscal_year():
+    return locum_fiscal_year_for(timezone.now().date())
+
 class Physician(models.Model):
     PHYSICIAN_TYPE_CHOICES = [
         ('regular', 'NROC Physician'),
@@ -173,20 +198,36 @@ class Physician(models.Model):
             year = timezone.now().year
         return CoverageAssignment.objects.filter(covering_physician=self, date__year=year).count()
     
-    def total_coverage_hours(self, year=None):
+    def total_coverage_days(self, year=None):
+        """Coverage days worked in a locum fiscal year (Oct 1 – Sep 30)."""
         if year is None:
-            year = timezone.now().year
+            year = current_locum_fiscal_year()
+        fy_start, fy_end = locum_fiscal_year_range(year)
+        return CoverageAssignment.objects.filter(
+            covering_physician=self, date__gte=fy_start, date__lte=fy_end
+        ).count()
+    
+    def total_coverage_hours(self, year=None):
+        """Coverage hours worked in a locum fiscal year (Oct 1 – Sep 30)."""
+        if year is None:
+            year = current_locum_fiscal_year()
+        fy_start, fy_end = locum_fiscal_year_range(year)
         from django.db.models import Sum
         result = CoverageAssignment.objects.filter(
-            covering_physician=self, date__year=year
+            covering_physician=self, date__gte=fy_start, date__lte=fy_end
         ).aggregate(total=Sum('hours'))
         return result['total'] or Decimal('0.00')
 
     def total_coverage_cost(self, year=None):
+        """Coverage cost accrued in a locum fiscal year (Oct 1 – Sep 30).
+
+        Totals reset every October 1 (fiscal year ends 9/30).
+        """
         if year is None:
-            year = timezone.now().year
+            year = current_locum_fiscal_year()
+        fy_start, fy_end = locum_fiscal_year_range(year)
         assignments = CoverageAssignment.objects.filter(
-            covering_physician=self, date__year=year
+            covering_physician=self, date__gte=fy_start, date__lte=fy_end
         )
         total = Decimal('0.00')
         for a in assignments:

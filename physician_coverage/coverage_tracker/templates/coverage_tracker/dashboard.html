@@ -37,12 +37,12 @@
   </div>
   {% if is_admin %}
   <div class="stat-card">
-    <div class="stat-label">{{  cost_year }} Locum Hours</div>
+    <div class="stat-label">FY{{  cost_year }} Locum Hours</div>
     <div class="stat-value" style="color:var(--amber);">{{ total_locum_hours }}</div>
     <div class="stat-sub">total hours worked</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">{{  cost_year }} Locum Cost</div>
+    <div class="stat-label">FY{{  cost_year }} Locum Cost</div>
     <div class="stat-value" style="color:var(--amber); font-size:20px;">${{ total_locum_cost|floatformat:0 }}</div>
     <div class="stat-sub">total spend</div>
   </div>
@@ -105,7 +105,7 @@
   <!-- Locum cost summary -->
   <div class="card">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>{{  cost_year }} Locum Cost Summary</span>
+      <span>FY{{  cost_year }} Locum Cost Summary</span>
       <a href="/locum-costs/?year={{ cost_year}}" class="btn btn-ghost btn-sm">Full report</a>
     </div>
     <div class="table-wrap">

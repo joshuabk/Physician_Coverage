@@ -1,15 +1,15 @@
 {% extends "coverage_tracker/base.html" %}
-{% block title %}Locum Costs — {{ year }}{% endblock %}
+{% block title %}Locum Costs — FY{{ year }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
     <h1>Locum Cost Report</h1>
-    <p class="text-muted text-sm mt-1">Coverage cost tracking for locum physicians</p>
+    <p class="text-muted text-sm mt-1">Coverage cost tracking for locum physicians — fiscal year Oct 1 &ndash; Sep 30 (FY{{ year }} ends 9/30/{{ year }})</p>
   </div>
   <form method="get" style="display:flex;gap:8px;align-items:center;">
     <select name="year" class="form-control" style="width:90px;">
       {% for y in years %}
-      <option value="{{ y }}" {% if y == year|stringformat:"i" %}selected{% endif %}>{{ y }}</option>
+      <option value="{{ y }}" {% if y == year %}selected{% endif %}>FY{{ y }}</option>
       {% endfor %}
     </select>
     <select name="month" class="form-control" style="width:130px;">
@@ -28,7 +28,7 @@
   <div class="stat-card">
     <div class="stat-label">Total Cost</div>
     <div class="stat-value" style="color:var(--amber);font-size:20px;">${{ grand_total|floatformat:0 }}</div>
-    <div class="stat-sub">{% if month_filter %}this month{% else %}{{ year }} YTD{% endif %}</div>
+    <div class="stat-sub">{% if month_filter %}this month{% else %}FY{{ year }} to date{% endif %}</div>
   </div>
    <div class="stat-card">
     <div class="stat-label">Total Hours</div>
@@ -53,7 +53,7 @@
 
   <!-- Per-locum summary -->
   <div class="card">
-    <div class="card-title">Cost by Locum Physician — {{ year }}{% if month_filter %} / {{ month_filter }}{% endif %}</div>
+    <div class="card-title">Cost by Locum Physician — FY{{ year }}{% if month_filter %} / {{ month_filter }}{% endif %}</div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Physician</th><th>Agency</th><th>Rate/hr</th><th>Hours</th><th>Total Cost</th></tr></thead>
@@ -92,7 +92,7 @@
   <!-- Monthly breakdown -->
    <!-- Monthly breakdown -->
   <div class="card">
-    <div class="card-title">Monthly Breakdown — {{ year }}</div>
+    <div class="card-title">Monthly Breakdown — FY{{ year }}</div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Month</th><th>Hours</th><th>Cost</th><th></th></tr></thead>
