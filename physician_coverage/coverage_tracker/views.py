@@ -31,7 +31,7 @@ from django.core.exceptions import ValidationError
 
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
-    CoverageRequest, UserProfile, OnCallSchedule, ClinicSchedule,
+    CoverageRequest, UserProfile, OnCallSchedule, ClinicSchedule, DayReassignment,
     get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, fiscal_year_range, 
     current_locum_fiscal_year, locum_fiscal_year_range,
 )
@@ -735,6 +735,74 @@ def deny_time_off(request, pk):
     return redirect('time_off_list')
 
 
+def _staffing_base():
+    """Prefetch the data needed to compute daily clinic staffing.
+
+    Returns (clinics, slots, schedule_managed_ids): active clinics with their
+    legacy physician affiliations, all weekly-schedule slots for active
+    physicians, and the ids of every physician managed by the weekly grid.
+    """
+    clinics = list(
+        Clinic.objects.filter(is_active=True).prefetch_related('regular_physicians')
+    )
+    slots = list(
+        ClinicSchedule.objects.filter(physician__is_active=True)
+        .select_related('physician', 'clinic')
+    )
+    schedule_managed_ids = set(
+        ClinicSchedule.objects.values_list('physician_id', flat=True)
+    )
+    return clinics, slots, schedule_managed_ids
+
+
+def _clinic_sessions_for_date(view_date, clinics, slots, schedule_managed_ids,
+                              reassignments):
+    """Effective staffing for one date, merging three layers:
+
+    weekly schedule -> legacy full-week affiliation (physicians without a
+    weekly grid) -> one-day reassignments on top.
+
+    Returns (clinic_sessions, reassigned_slots) where clinic_sessions is
+    {clinic_id: {physician: set of 'am'/'pm' sessions here}} and
+    reassigned_slots is {(physician_id, session, clinic_id)} for badging.
+    """
+    weekday = view_date.weekday()
+    effective = {}  # physician -> {'am': set of clinic_ids, 'pm': ...}
+
+    def _sessions_for(p):
+        return effective.setdefault(p, {'am': set(), 'pm': set()})
+
+    for slot in slots:
+        if slot.day_of_week == weekday:
+            _sessions_for(slot.physician)[slot.session].add(slot.clinic_id)
+    for clinic in clinics:
+        for p in clinic.regular_physicians.all():
+            if p.id not in schedule_managed_ids and p.is_active:
+                sess = _sessions_for(p)
+                sess['am'].add(clinic.id)
+                sess['pm'].add(clinic.id)
+
+    reassigned_slots = set()
+    for r in reassignments:
+        sess = _sessions_for(r.physician)
+        override_sessions = ['am', 'pm'] if r.session == 'full' else [r.session]
+        for s in override_sessions:
+            sess[s] = {r.clinic_id}
+            reassigned_slots.add((r.physician.id, s, r.clinic_id))
+
+    clinic_sessions = {}
+    for p, sess in effective.items():
+        for s in ('am', 'pm'):
+            for cid in sess[s]:
+                clinic_sessions.setdefault(cid, {}).setdefault(p, set()).add(s)
+    return clinic_sessions, reassigned_slots
+
+
+def _session_label(sessions):
+    return ('Full day' if sessions >= {'am', 'pm'}
+            else ('AM' if 'am' in sessions else 'PM'))
+
+
 @clinic_access_required
 def clinic_list(request):
     selected_date = request.GET.get('date', str(date.today()))
@@ -746,21 +814,14 @@ def clinic_list(request):
     clinics = Clinic.objects.filter(is_active=True).prefetch_related('regular_physicians')
 
     # ── Who works where today? ────────────────────────────────────────────
-    # Physicians with a weekly schedule are placed per (weekday, AM/PM) slot;
-    # physicians without one fall back to the legacy full-week clinic
-    # affiliation (Clinic.regular_physicians) and count as full days.
-    weekday = view_date.weekday()
-    schedule_managed_ids = set(
-        ClinicSchedule.objects.values_list('physician_id', flat=True)
-    )
-    today_slots = ClinicSchedule.objects.filter(
-        day_of_week=weekday, physician__is_active=True,
+    # Weekly schedule -> legacy affiliation fallback -> day reassignments.
+    # (Shared with the monthly calendar; see _clinic_sessions_for_date.)
+    clinics, slots, schedule_managed_ids = _staffing_base()
+    reassignments = DayReassignment.objects.filter(
+        date=view_date, physician__is_active=True,
     ).select_related('physician', 'clinic')
-    # clinic_id -> {physician: set of sessions at this clinic today}
-    clinic_sessions = {}
-    for slot in today_slots:
-        clinic_sessions.setdefault(slot.clinic_id, {}).setdefault(
-            slot.physician, set()).add(slot.session)
+    clinic_sessions, reassigned_slots = _clinic_sessions_for_date(
+        view_date, clinics, slots, schedule_managed_ids, reassignments)
 
     # Map each out physician to their approved time-off request so the
     # template can deep-link straight to that request's assignment page.
@@ -793,7 +854,8 @@ def clinic_list(request):
             date=view_date, no_coverage_needed=True
         ).values_list('covered_physician_id', flat=True)
         )
-        # Scheduled staff for this clinic today (half-day aware) …
+        # Staff for this clinic today (half-day aware; weekly schedule,
+        # legacy affiliation, and day reassignments were merged above).
         staff_today = []
         for p, sessions in clinic_sessions.get(clinic.id, {}).items():
             staff_today.append({
@@ -801,15 +863,10 @@ def clinic_list(request):
                 'label': 'Full day' if sessions >= {'am', 'pm'}
                          else ('AM' if 'am' in sessions else 'PM'),
                 'is_out': p.id in out_ids and p.id not in no_cov_physician_ids,
+                'reassigned': any(
+                    (p.id, s, clinic.id) in reassigned_slots for s in sessions
+                ),
             })
-        # … plus legacy full-week physicians who have no weekly schedule yet.
-        for p in clinic.regular_physicians.all():
-            if p.id not in schedule_managed_ids and p.is_active:
-                staff_today.append({
-                    'physician': p,
-                    'label': 'Full day',
-                    'is_out': p.id in out_ids and p.id not in no_cov_physician_ids,
-                })
         staff_today.sort(key=lambda s: (s['physician'].last_name,
                                         s['physician'].first_name))
         regular_out = [s['physician'] for s in staff_today if s['is_out']]
@@ -836,7 +893,231 @@ def clinic_list(request):
         'clinic_data': clinic_data,
         'view_date': view_date,
         'available_locums': available_locums,
+        'reassignments': reassignments,
+        'reassignable_physicians': Physician.objects.filter(
+            is_active=True, physician_type__in=['regular', 'psa']
+        ).order_by('last_name', 'first_name'),
+        'all_clinics': clinics,
+        'session_choices': DayReassignment.SESSION_CHOICES,
     })
+
+@admin_required
+def reassign_physician_day(request):
+    """Manually reassign an NROC/PSA physician to a different clinic for one
+    day (or one half day), straight from the clinics page."""
+    if request.method != 'POST':
+        return redirect('clinic_list')
+
+    date_str = request.POST.get('date', '')
+    try:
+        target_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        messages.error(request, 'Invalid date.')
+        return redirect('clinic_list')
+
+    back = f'/clinics/?date={target_date}'
+    try:
+        physician = Physician.objects.get(
+            pk=request.POST.get('physician'), is_active=True,
+            physician_type__in=['regular', 'psa'])
+        clinic = Clinic.objects.get(pk=request.POST.get('clinic'), is_active=True)
+    except (Physician.DoesNotExist, Clinic.DoesNotExist, ValueError, TypeError):
+        messages.error(request, 'Pick a physician and a clinic.')
+        return redirect(back)
+
+    session = request.POST.get('session', 'full')
+    if session not in dict(DayReassignment.SESSION_CHOICES):
+        session = 'full'
+
+    reassignment = DayReassignment(
+        physician=physician, clinic=clinic, date=target_date,
+        session=session, note=request.POST.get('note', '').strip(),
+    )
+    try:
+        reassignment.full_clean()
+        reassignment.save()
+    except ValidationError as e:
+        messages.error(request, ' '.join(
+            m for msgs in e.message_dict.values() for m in msgs))
+        return redirect(back)
+
+    messages.success(
+        request,
+        f'{physician} reassigned to {clinic} on {target_date} '
+        f'({reassignment.get_session_display()}).')
+    return redirect(back)
+
+
+@admin_required
+def delete_reassignment(request, pk):
+    if request.method != 'POST':
+        return redirect('clinic_list')
+    reassignment = get_object_or_404(DayReassignment, pk=pk)
+    back = f'/clinics/?date={reassignment.date}'
+    messages.success(
+        request,
+        f'Removed reassignment: {reassignment.physician} → '
+        f'{reassignment.clinic} on {reassignment.date}.')
+    reassignment.delete()
+    return redirect(back)
+
+
+@clinic_access_required
+def calendar_view(request):
+    """Monthly calendar: who is scheduled at which clinic each day, and who
+    is off. Clicking a day shows the full per-clinic summary for that day.
+
+    Uses the same layering as the clinics page: weekly schedule -> legacy
+    clinic affiliation fallback -> one-day reassignments, plus approved
+    time off for the 'off' list.
+    """
+    today = date.today()
+    year = _int_param(request, 'year', today.year)
+    month = _int_param(request, 'month', today.month)
+    if not (1 <= month <= 12):
+        month = today.month
+    if not (2000 <= year <= 2100):
+        year = today.year
+
+    first_of_month = date(year, month, 1)
+    prev_month = (first_of_month - timedelta(days=1)).replace(day=1)
+    next_month = (first_of_month + timedelta(days=32)).replace(day=1)
+
+    # Calendar grid (weeks start on Sunday), including adjacent-month days.
+    cal = calendar.Calendar(firstweekday=6)
+    weeks = cal.monthdatescalendar(year, month)
+    span_start, span_end = weeks[0][0], weeks[-1][-1]
+
+    # ── Bulk-fetch everything for the whole grid ──────────────────────────
+    clinics = list(Clinic.objects.filter(is_active=True))
+
+    schedule_rows = list(ClinicSchedule.objects.filter(
+        physician__is_active=True).select_related('physician', 'clinic'))
+    schedule_managed_ids = {r.physician_id for r in schedule_rows}
+    slots_by_weekday = {}
+    for r in schedule_rows:
+        slots_by_weekday.setdefault(r.day_of_week, []).append(r)
+
+    legacy_pairs = []  # (physician, clinic) for physicians without a weekly grid
+    for c in Clinic.objects.filter(is_active=True).prefetch_related('regular_physicians'):
+        for p in c.regular_physicians.all():
+            if p.is_active and p.id not in schedule_managed_ids:
+                legacy_pairs.append((p, c))
+
+    reassigns_by_date = {}
+    for r in DayReassignment.objects.filter(
+            date__gte=span_start, date__lte=span_end,
+            physician__is_active=True).select_related('physician', 'clinic'):
+        reassigns_by_date.setdefault(r.date, []).append(r)
+
+    off_by_date = {}
+    for req in TimeOffRequest.objects.filter(
+            status='approved', start_date__lte=span_end, end_date__gte=span_start,
+            physician__is_active=True,
+            physician__physician_type__in=['regular', 'psa'],
+            ).select_related('physician'):
+        d = max(req.start_date, span_start)
+        stop = min(req.end_date, span_end)
+        while d <= stop:
+            off_by_date.setdefault(d, set()).add(req.physician)
+            d += timedelta(days=1)
+
+    holidays, extra = set(), set()
+    for y in {span_start.year, span_end.year}:
+        holidays |= set(get_holidays(y))
+        extra |= get_extra_workdays(y)
+
+    # ── Per-day staffing (same layering as the clinics page) ──────────────
+    def staffing_for(day):
+        effective = {}   # physician -> {'am': set(clinic_ids), 'pm': ...}
+        reassigned_slots = set()
+
+        def sess_for(p):
+            return effective.setdefault(p, {'am': set(), 'pm': set()})
+
+        for slot in slots_by_weekday.get(day.weekday(), []):
+            sess_for(slot.physician)[slot.session].add(slot.clinic_id)
+        for p, c in legacy_pairs:
+            s = sess_for(p)
+            s['am'].add(c.id)
+            s['pm'].add(c.id)
+        for r in reassigns_by_date.get(day, []):
+            s = sess_for(r.physician)
+            for ss in (['am', 'pm'] if r.session == 'full' else [r.session]):
+                s[ss] = {r.clinic_id}
+                reassigned_slots.add((r.physician.id, ss, r.clinic_id))
+
+        by_clinic = {}   # clinic_id -> {physician: set(sessions)}
+        for p, s in effective.items():
+            for ss in ('am', 'pm'):
+                for cid in s[ss]:
+                    by_clinic.setdefault(cid, {}).setdefault(p, set()).add(ss)
+        return by_clinic, reassigned_slots
+
+    weeks_data = []
+    day_summaries = {}   # date iso -> JSON-safe summary for the click panel
+    for week in weeks:
+        row = []
+        for day in week:
+            workday = is_workday(day, holidays, extra)
+            cell = {
+                'date': day,
+                'in_month': day.month == month,
+                'is_workday': workday,
+                'is_today': day == today,
+                'clinics': [],
+                'off': [],
+            }
+            summary = {
+                'label': f"{day.strftime('%A, %B')} {day.day}, {day.year}",
+                'workday': workday,
+                'clinics': [],
+                'off': [],
+            }
+            if workday:
+                by_clinic, reassigned_slots = staffing_for(day)
+                off_today = off_by_date.get(day, set())
+                for c in clinics:
+                    people = by_clinic.get(c.id)
+                    if not people:
+                        continue
+                    staff = []
+                    for p, sessions in sorted(
+                            people.items(),
+                            key=lambda kv: (kv[0].last_name, kv[0].first_name)):
+                        staff.append({
+                            'name': str(p),
+                            'initials': f"{p.first_name[:1]}{p.last_name[:1]}".upper(),
+                            'label': ('Full day' if sessions >= {'am', 'pm'}
+                                      else ('AM' if 'am' in sessions else 'PM')),
+                            'out': p in off_today,
+                            'psa': p.is_psa,
+                            'reassigned': any(
+                                (p.id, ss, c.id) in reassigned_slots
+                                for ss in sessions),
+                        })
+                    cell['clinics'].append({'clinic': c, 'staff': staff})
+                    summary['clinics'].append(
+                        {'name': c.name, 'staff': staff})
+                off_sorted = sorted(
+                    off_today, key=lambda p: (p.last_name, p.first_name))
+                cell['off'] = off_sorted
+                summary['off_detail'] = [
+                    {'name': str(p), 'psa': p.is_psa} for p in off_sorted]
+            day_summaries[day.isoformat()] = summary
+            row.append(cell)
+        weeks_data.append(row)
+
+    return render(request, 'coverage_tracker/calendar.html', {
+        'weeks': weeks_data,
+        'month_label': f"{calendar.month_name[month]} {year}",
+        'prev_month': prev_month,
+        'next_month': next_month,
+        'today': today,
+        'day_summaries': day_summaries,
+        'weekday_headers': ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    })
+
 
 @admin_required
 def assign_day_coverage(request):

@@ -28,9 +28,14 @@ urlpatterns = [
     path('time-off/<int:pk>/assign-locum/', views.assign_locum_to_time_off, name='assign_locum_to_time_off'),
     path('coverage-day/<int:assignment_pk>/delete/', views.delete_time_off_coverage_day, name='delete_time_off_coverage_day'),
 
+    # Calendar
+    path('calendar/', views.calendar_view, name='calendar'),
+
     # Clinics & Coverage
     path('clinics/', views.clinic_list, name='clinic_list'),
     path('clinics/assign-day/', views.assign_day_coverage, name='assign_day_coverage'),
+    path('clinics/reassign/', views.reassign_physician_day, name='reassign_physician_day'),
+    path('clinics/reassign/<int:pk>/delete/', views.delete_reassignment, name='delete_reassignment'),
     path('clinics/add/', views.add_clinic, name='add_clinic'),
     path('clinics/<int:pk>/edit/', views.edit_clinic, name='edit_clinic'),
     path('coverage/add/', views.add_coverage, name='add_coverage'),

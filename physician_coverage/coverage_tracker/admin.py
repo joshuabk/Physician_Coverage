@@ -4,7 +4,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment,
     PhysicianAvailability, CoverageRequest, UserProfile, OnCallSchedule,
-    ClinicSchedule,
+    ClinicSchedule, DayReassignment,
 )
 
 
@@ -66,6 +66,13 @@ class ClinicAdmin(admin.ModelAdmin):
 
 
 # ── ClinicSchedule (weekly half-day grid) ─────────────────────────────────────
+@admin.register(DayReassignment)
+class DayReassignmentAdmin(admin.ModelAdmin):
+    list_display = ['physician', 'date', 'session', 'clinic', 'note']
+    list_filter = ['session', 'clinic', 'date']
+    search_fields = ['physician__first_name', 'physician__last_name', 'clinic__name']
+
+
 @admin.register(ClinicSchedule)
 class ClinicScheduleAdmin(admin.ModelAdmin):
     list_display = ['physician', 'day_of_week', 'session', 'clinic']

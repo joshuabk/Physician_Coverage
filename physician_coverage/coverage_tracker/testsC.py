@@ -874,3 +874,225 @@ class ClinicScheduleTests(TestCase):
         self.assertEqual(monday['day'], 'Monday')
         self.assertEqual(monday['am'].clinic, self.clinic_a)
         self.assertEqual(monday['pm'].clinic, self.clinic_b)
+
+
+class DayReassignmentTests(TestCase):
+    """One-day manual location overrides for NROC and PSA physicians."""
+
+    MONDAY = date(2026, 7, 13)
+
+    def setUp(self):
+        from .models import ClinicSchedule, DayReassignment
+        self.ClinicSchedule = ClinicSchedule
+        self.DayReassignment = DayReassignment
+        self.clinic_a = Clinic.objects.create(name='Alpharetta')
+        self.clinic_b = Clinic.objects.create(name='Buckhead')
+        self.nroc = Physician.objects.create(
+            first_name='Nina', last_name='Roc', email='nr2@x.com',
+            physician_type='regular')
+        self.psa = Physician.objects.create(
+            first_name='Pat', last_name='Sa', email='ps2@x.com',
+            physician_type='psa')
+        # NROC works Mondays full day at A (weekly schedule)
+        for session in ('am', 'pm'):
+            self.ClinicSchedule.objects.create(
+                physician=self.nroc, clinic=self.clinic_a,
+                day_of_week=0, session=session)
+        # PSA has only a legacy affiliation with A
+        self.clinic_a.regular_physicians.add(self.psa)
+        self.admin = make_user('reassignboss', role='admin', superuser=True)
+        self.client_ = Client()
+        self.client_.force_login(self.admin)
+
+    def _staff(self, resp):
+        return {
+            item['clinic'].name: {
+                s['physician'].pk: s for s in item['staff_today']
+            }
+            for item in resp.context['clinic_data']
+        }
+
+    def test_full_day_reassignment_moves_scheduled_physician(self):
+        self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='full')
+        staff = self._staff(self.client_.get(f'/clinics/?date={self.MONDAY}'))
+        self.assertNotIn(self.nroc.pk, staff['Alpharetta'])
+        self.assertEqual(staff['Buckhead'][self.nroc.pk]['label'], 'Full day')
+        self.assertTrue(staff['Buckhead'][self.nroc.pk]['reassigned'])
+
+    def test_half_day_reassignment_splits_the_day(self):
+        # PM moved to B; AM stays at A per the weekly schedule
+        self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='pm')
+        staff = self._staff(self.client_.get(f'/clinics/?date={self.MONDAY}'))
+        self.assertEqual(staff['Alpharetta'][self.nroc.pk]['label'], 'AM')
+        self.assertEqual(staff['Buckhead'][self.nroc.pk]['label'], 'PM')
+        self.assertTrue(staff['Buckhead'][self.nroc.pk]['reassigned'])
+        self.assertFalse(staff['Alpharetta'][self.nroc.pk]['reassigned'])
+
+    def test_reassignment_works_for_legacy_psa_physician(self):
+        self.DayReassignment.objects.create(
+            physician=self.psa, clinic=self.clinic_b,
+            date=self.MONDAY, session='full')
+        staff = self._staff(self.client_.get(f'/clinics/?date={self.MONDAY}'))
+        self.assertNotIn(self.psa.pk, staff['Alpharetta'])
+        self.assertEqual(staff['Buckhead'][self.psa.pk]['label'], 'Full day')
+
+    def test_only_applies_on_that_date(self):
+        self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='full')
+        next_monday = self.MONDAY + timedelta(days=7)
+        staff = self._staff(self.client_.get(f'/clinics/?date={next_monday}'))
+        self.assertIn(self.nroc.pk, staff['Alpharetta'])
+        self.assertNotIn(self.nroc.pk, staff.get('Buckhead', {}))
+
+    def test_post_endpoint_creates_reassignment(self):
+        r = self.client_.post('/clinics/reassign/', {
+            'date': str(self.MONDAY), 'physician': self.psa.pk,
+            'clinic': self.clinic_b.pk, 'session': 'am', 'note': 'staff gap',
+        })
+        self.assertEqual(r.status_code, 302)
+        row = self.DayReassignment.objects.get(physician=self.psa)
+        self.assertEqual((row.clinic, row.date, row.session, row.note),
+                         (self.clinic_b, self.MONDAY, 'am', 'staff gap'))
+
+    def test_full_day_conflicts_with_existing_half_day(self):
+        self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='am')
+        r = self.client_.post('/clinics/reassign/', {
+            'date': str(self.MONDAY), 'physician': self.nroc.pk,
+            'clinic': self.clinic_b.pk, 'session': 'full',
+        }, follow=True)
+        self.assertEqual(
+            self.DayReassignment.objects.filter(physician=self.nroc).count(), 1)
+        self.assertContains(r, 'already has a reassignment')
+
+    def test_delete_endpoint(self):
+        row = self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='full')
+        r = self.client_.post(f'/clinics/reassign/{row.pk}/delete/')
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(self.DayReassignment.objects.exists())
+
+    def test_reassign_requires_admin(self):
+        phys_user = make_user('plainreassign', role='physician', scope='nroc')
+        c2 = Client()
+        c2.force_login(phys_user)
+        r = c2.post('/clinics/reassign/', {
+            'date': str(self.MONDAY), 'physician': self.nroc.pk,
+            'clinic': self.clinic_b.pk,
+        })
+        self.assertEqual(self.DayReassignment.objects.count(), 0)
+
+    def test_locum_cannot_be_reassigned(self):
+        locum = Physician.objects.create(
+            first_name='Lo', last_name='Cum', email='lc2@x.com',
+            physician_type='locum')
+        r = self.client_.post('/clinics/reassign/', {
+            'date': str(self.MONDAY), 'physician': locum.pk,
+            'clinic': self.clinic_b.pk,
+        }, follow=True)
+        self.assertEqual(self.DayReassignment.objects.count(), 0)
+
+
+class CalendarViewTests(TestCase):
+    """Monthly calendar showing per-day clinic staffing and who is off."""
+
+    MONDAY = date(2026, 7, 13)
+
+    def setUp(self):
+        from .models import ClinicSchedule, DayReassignment
+        self.ClinicSchedule = ClinicSchedule
+        self.DayReassignment = DayReassignment
+        self.clinic_a = Clinic.objects.create(name='Alpharetta')
+        self.clinic_b = Clinic.objects.create(name='Buckhead')
+        self.nroc = Physician.objects.create(
+            first_name='Nina', last_name='Roc', email='nr3@x.com',
+            physician_type='regular')
+        self.psa = Physician.objects.create(
+            first_name='Pat', last_name='Sa', email='ps3@x.com',
+            physician_type='psa')
+        # NROC: Mondays full day at A via the weekly grid
+        for session in ('am', 'pm'):
+            self.ClinicSchedule.objects.create(
+                physician=self.nroc, clinic=self.clinic_a,
+                day_of_week=0, session=session)
+        # PSA: legacy affiliation with B
+        self.clinic_b.regular_physicians.add(self.psa)
+        self.admin = make_user('calboss', role='admin', superuser=True)
+        self.client_ = Client()
+        self.client_.force_login(self.admin)
+
+    def _get(self, year=2026, month=7):
+        return self.client_.get(f'/calendar/?year={year}&month={month}')
+
+    def _summary(self, resp, d):
+        return resp.context['day_summaries'][d.isoformat()]
+
+    def test_scheduled_physicians_appear_on_their_days(self):
+        r = self._get()
+        self.assertEqual(r.status_code, 200)
+        monday = self._summary(r, self.MONDAY)
+        clinics = {c['name']: c['staff'] for c in monday['clinics']}
+        a_names = {(s['name'], s['label']) for s in clinics['Alpharetta']}
+        self.assertIn(('Dr. Nina Roc', 'Full day'), a_names)
+        # Legacy PSA shows at B every workday
+        b_names = {s['name'] for s in clinics['Buckhead']}
+        self.assertIn('Dr. Pat Sa', b_names)
+        # Weekly-grid physician absent on a day they aren't scheduled
+        tuesday = self._summary(r, self.MONDAY + timedelta(days=1))
+        tue_clinics = {c['name']: c['staff'] for c in tuesday['clinics']}
+        tue_a = {s['name'] for s in tue_clinics.get('Alpharetta', [])}
+        self.assertNotIn('Dr. Nina Roc', tue_a)
+
+    def test_off_physicians_listed_and_flagged(self):
+        TimeOffRequest.objects.create(
+            physician=self.nroc, status='approved', request_type='vacation',
+            start_date=self.MONDAY, end_date=self.MONDAY)
+        monday = self._summary(self._get(), self.MONDAY)
+        self.assertIn('Dr. Nina Roc', monday['off'])
+        clinics = {c['name']: c['staff'] for c in monday['clinics']}
+        entry = next(s for s in clinics['Alpharetta']
+                     if s['name'] == 'Dr. Nina Roc')
+        self.assertTrue(entry['out'])
+
+    def test_reassignment_reflected_on_calendar(self):
+        self.DayReassignment.objects.create(
+            physician=self.nroc, clinic=self.clinic_b,
+            date=self.MONDAY, session='pm')
+        monday = self._summary(self._get(), self.MONDAY)
+        clinics = {c['name']: c['staff'] for c in monday['clinics']}
+        a = next(s for s in clinics['Alpharetta'] if s['name'] == 'Dr. Nina Roc')
+        b = next(s for s in clinics['Buckhead'] if s['name'] == 'Dr. Nina Roc')
+        self.assertEqual(a['label'], 'AM')
+        self.assertEqual(b['label'], 'PM')
+        self.assertTrue(b['reassigned'])
+
+    def test_weekend_and_holiday_not_workdays(self):
+        r = self._get()
+        saturday = self._summary(r, date(2026, 7, 11))
+        self.assertFalse(saturday['workday'])
+        self.assertEqual(saturday['clinics'], [])
+        july4_observed = self._summary(self._get(month=7), date(2026, 7, 4))
+        self.assertFalse(july4_observed['workday'])
+
+    def test_month_navigation_bounds(self):
+        r = self.client_.get('/calendar/?year=2026&month=13')
+        self.assertEqual(r.status_code, 200)  # falls back to current month
+        r = self._get(year=2026, month=1)
+        self.assertIn(date(2026, 1, 1).isoformat(), r.context['day_summaries'])
+
+    def test_nursing_can_view_physician_cannot(self):
+        nurse = make_user('calnurse', role='nursing')
+        c2 = Client()
+        c2.force_login(nurse)
+        self.assertEqual(c2.get('/calendar/').status_code, 200)
+        doc = make_user('caldoc', role='physician', scope='nroc')
+        c3 = Client()
+        c3.force_login(doc)
+        self.assertEqual(c3.get('/calendar/').status_code, 302)  # bounced

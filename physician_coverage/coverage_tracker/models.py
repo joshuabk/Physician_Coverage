@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import date
 import datetime
@@ -323,6 +324,60 @@ class ClinicSchedule(models.Model):
     def __str__(self):
         return (f"{self.physician} — {self.get_day_of_week_display()} "
                 f"{self.get_session_display()} @ {self.clinic}")
+
+
+class DayReassignment(models.Model):
+    """One-day location override for an NROC or PSA physician.
+
+    Overrides the weekly schedule (or legacy clinic affiliation) for a single
+    date: e.g. Dr. X normally works Mondays at Clinic A, but on 2026-08-03
+    they are reassigned to Clinic B. Can override the full day or just the
+    morning/afternoon half.
+    """
+    SESSION_CHOICES = [
+        ('full', 'Full day'),
+        ('am', 'Morning'),
+        ('pm', 'Afternoon'),
+    ]
+
+    physician = models.ForeignKey(
+        Physician, on_delete=models.CASCADE, related_name='day_reassignments',
+        limit_choices_to={'physician_type__in': ['regular', 'psa']},
+    )
+    clinic = models.ForeignKey(
+        Clinic, on_delete=models.CASCADE, related_name='day_reassignments',
+        help_text="Where the physician will work on this date",
+    )
+    date = models.DateField()
+    session = models.CharField(max_length=4, choices=SESSION_CHOICES, default='full')
+    note = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date', 'physician']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['physician', 'date', 'session'],
+                name='one_reassignment_per_physician_date_session',
+            ),
+        ]
+
+    def clean(self):
+        """A full-day override can't coexist with a half-day one (and vice versa)."""
+        qs = DayReassignment.objects.filter(
+            physician=self.physician, date=self.date).exclude(pk=self.pk)
+        if self.session == 'full' and qs.exists():
+            raise ValidationError(
+                'This physician already has a reassignment on this date. '
+                'Remove it before adding a full-day reassignment.')
+        if self.session != 'full' and qs.filter(session='full').exists():
+            raise ValidationError(
+                'This physician already has a full-day reassignment on this '
+                'date. Remove it before adding a half-day reassignment.')
+
+    def __str__(self):
+        return (f"{self.physician} → {self.clinic} on {self.date} "
+                f"({self.get_session_display()})")
 
 
 class TimeOffRequest(models.Model):
