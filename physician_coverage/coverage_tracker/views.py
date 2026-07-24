@@ -1102,6 +1102,7 @@ def calendar_view(request):
                 off_sorted = sorted(
                     off_today, key=lambda p: (p.last_name, p.first_name))
                 cell['off'] = off_sorted
+                summary['off'] = [str(p) for p in off_sorted]
                 summary['off_detail'] = [
                     {'name': str(p), 'psa': p.is_psa} for p in off_sorted]
             day_summaries[day.isoformat()] = summary
@@ -1244,6 +1245,64 @@ def delete_coverage(request, pk):
     assignment.delete()
     messages.success(request, 'Coverage assignment removed.')
     return redirect(f'/clinics/?date={date_str}')
+
+
+@admin_required
+def locum_reports(request):
+    """Monthly timesheet-style report for one locum: date, hours, facility,
+    and supervising (covered) physician per shift, mirroring the Northside
+    physician time sheet. Each shift defaults to 8 hours unless the coverage
+    record has explicit hours.
+    """
+    today = date.today()
+    locums = Physician.objects.filter(
+        is_active=True, physician_type='locum'
+    ).order_by('last_name', 'first_name')
+
+    # Selected locum (default: first) and month ('YYYY-MM', default: current).
+    locum = None
+    locum_pk = request.GET.get('locum')
+    if locum_pk:
+        locum = locums.filter(pk=locum_pk).first()
+    if locum is None:
+        locum = locums.first()
+
+    month_str = request.GET.get('month', '')
+    try:
+        report_year, report_month = (int(x) for x in month_str.split('-'))
+        date(report_year, report_month, 1)  # validates
+    except (ValueError, TypeError):
+        report_year, report_month = today.year, today.month
+
+    rows, total_hours = [], Decimal('0')
+    if locum:
+        assignments = CoverageAssignment.objects.filter(
+            covering_physician=locum, no_coverage_needed=False,
+            date__year=report_year, date__month=report_month,
+        ).select_related('clinic', 'covered_physician').order_by('date')
+        for a in assignments:
+            hours = a.hours if a.hours else Decimal('8')
+            total_hours += hours
+            rows.append({
+                'date': a.date,
+                'hours': hours,
+                'facility': a.clinic.name,
+                'supervisor': str(a.covered_physician) if a.covered_physician else '—',
+            })
+
+    # Pad with blank rows so the printed sheet looks like the paper form.
+    blank_rows = range(max(0, 15 - len(rows)))
+
+    return render(request, 'coverage_tracker/locum_reports.html', {
+        'locums': locums,
+        'locum': locum,
+        'rows': rows,
+        'blank_rows': blank_rows,
+        'total_hours': total_hours,
+        'month_value': f'{report_year}-{report_month:02d}',
+        'month_label': f'{calendar.month_name[report_month]}, {report_year}',
+        'facilities': sorted({r['facility'] for r in rows}),
+    })
 
 
 @admin_required

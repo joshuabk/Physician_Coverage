@@ -1096,3 +1096,80 @@ class CalendarViewTests(TestCase):
         c3 = Client()
         c3.force_login(doc)
         self.assertEqual(c3.get('/calendar/').status_code, 302)  # bounced
+
+
+class LocumReportTests(TestCase):
+    """Monthly timesheet report per locum: 8h shifts, supervisor = covered doc."""
+
+    def setUp(self):
+        self.clinic = Clinic.objects.create(name='Alpharetta')
+        self.locum = Physician.objects.create(
+            first_name='Lo', last_name='Cum', email='lr@x.com',
+            physician_type='locum', hourly_rate=Decimal('300'))
+        self.locum2 = Physician.objects.create(
+            first_name='Zed', last_name='Zulu', email='zz@x.com',
+            physician_type='locum')
+        self.nroc = Physician.objects.create(
+            first_name='Nina', last_name='Roc', email='nr3@x.com',
+            physician_type='regular')
+        self.admin = make_user('reportboss', role='admin', superuser=True)
+        self.client_ = Client()
+        self.client_.force_login(self.admin)
+
+    def _cov(self, day, locum=None, hours=None, covered=True):
+        return CoverageAssignment.objects.create(
+            clinic=self.clinic, covering_physician=locum or self.locum,
+            covered_physician=self.nroc if covered else None,
+            date=day, hours=hours)
+
+    def test_report_rows_default_8_hours_and_supervisor(self):
+        self._cov(date(2026, 7, 6))
+        self._cov(date(2026, 7, 7))
+        r = self.client_.get(f'/locum-reports/?locum={self.locum.pk}&month=2026-07')
+        self.assertEqual(r.status_code, 200)
+        rows = r.context['rows']
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['hours'], Decimal('8'))
+        self.assertEqual(rows[0]['facility'], 'Alpharetta')
+        self.assertEqual(rows[0]['supervisor'], 'Dr. Nina Roc')
+        self.assertEqual(r.context['total_hours'], Decimal('16'))
+        self.assertContains(r, 'July, 2026')
+
+    def test_recorded_hours_override_default(self):
+        self._cov(date(2026, 7, 6), hours=Decimal('4.5'))
+        r = self.client_.get(f'/locum-reports/?locum={self.locum.pk}&month=2026-07')
+        self.assertEqual(r.context['rows'][0]['hours'], Decimal('4.5'))
+        self.assertEqual(r.context['total_hours'], Decimal('4.5'))
+
+    def test_month_and_locum_filtering(self):
+        self._cov(date(2026, 7, 6))
+        self._cov(date(2026, 8, 3))                      # other month
+        self._cov(date(2026, 7, 8), locum=self.locum2)   # other locum
+        r = self.client_.get(f'/locum-reports/?locum={self.locum.pk}&month=2026-07')
+        self.assertEqual(len(r.context['rows']), 1)
+        self.assertEqual(r.context['rows'][0]['date'], date(2026, 7, 6))
+
+    def test_no_supervisor_shows_dash(self):
+        self._cov(date(2026, 7, 6), covered=False)
+        r = self.client_.get(f'/locum-reports/?locum={self.locum.pk}&month=2026-07')
+        self.assertEqual(r.context['rows'][0]['supervisor'], '—')
+
+    def test_defaults_first_locum_and_current_month(self):
+        r = self.client_.get('/locum-reports/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['locum'], self.locum)  # Cum < Zulu
+        self.assertEqual(r.context['month_value'],
+                         date.today().strftime('%Y-%m'))
+
+    def test_bad_month_falls_back(self):
+        r = self.client_.get(f'/locum-reports/?locum={self.locum.pk}&month=banana')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['month_value'],
+                         date.today().strftime('%Y-%m'))
+
+    def test_admin_only(self):
+        phys_user = make_user('plainreport', role='physician', scope='nroc')
+        c2 = Client()
+        c2.force_login(phys_user)
+        r = c2.get('/locum-reports/')
+        self.assertEqual(r.status_code, 302)

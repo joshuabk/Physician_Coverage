@@ -1,0 +1,108 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Locum Reports — PhysicianCoverage{% endblock %}
+
+{% block content %}
+<div class="page-header no-print">
+  <h1>Locum Reports</h1>
+  <button onclick="window.print()" class="btn btn-primary btn-sm" {% if not locum %}disabled{% endif %}>Print / Save PDF</button>
+</div>
+
+<style>
+  .ts-sheet { max-width: 760px; margin: 0 auto; background: #fff; color: #111;
+              padding: 36px 44px; border-radius: 8px; font-family: Georgia, 'Times New Roman', serif; }
+  .ts-line { margin: 6px 0; font-size: 14px; }
+  .ts-fill { display: inline-block; min-width: 260px; border-bottom: 1px solid #111; padding: 0 6px 1px; font-weight: 600; }
+  .ts-month { text-align: center; font-size: 15px; margin: 14px 0 2px; font-weight: 600; }
+  .ts-month-cap { text-align: center; font-size: 11px; color: #555; margin-bottom: 14px; }
+  .ts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ts-table th, .ts-table td { border: 1px solid #111; padding: 6px 8px; text-align: left; height: 24px; }
+  .ts-table th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .ts-total td { font-weight: 700; }
+  .ts-cert { font-size: 12px; margin-top: 22px; line-height: 1.5; }
+  .ts-sig { display: flex; justify-content: space-between; margin-top: 34px; font-size: 12px; }
+  .ts-sig div { width: 45%; border-top: 1px solid #111; padding-top: 4px; }
+  @media print {
+    nav, .no-print, .messages { display: none !important; }
+    body { background: #fff !important; }
+    .ts-sheet { border-radius: 0; padding: 0; max-width: none; }
+  }
+</style>
+
+<div class="card no-print" style="max-width:760px;margin:0 auto 1.25rem;">
+  <form method="get" class="flex items-center gap-3" style="flex-wrap:wrap;">
+    <div class="form-group" style="margin:0;">
+      <label>Locum physician</label>
+      <select name="locum" class="form-control" onchange="this.form.submit()">
+        {% for l in locums %}
+        <option value="{{ l.pk }}" {% if locum and l.pk == locum.pk %}selected{% endif %}>{{ l }}{% if l.agency %} — {{ l.agency }}{% endif %}</option>
+        {% empty %}
+        <option>No active locums</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label>Month</label>
+      <input type="month" name="month" class="form-control" value="{{ month_value }}" onchange="this.form.submit()">
+    </div>
+    <noscript><button type="submit" class="btn btn-primary btn-sm">View</button></noscript>
+  </form>
+</div>
+
+{% if locum %}
+<div class="ts-sheet">
+  <div class="ts-line">Physician Name: <span class="ts-fill">{{ locum }}</span></div>
+  <div class="ts-line">Cost Center #: <span class="ts-fill">&nbsp;</span></div>
+  <div class="ts-line">Clinic Name: <span class="ts-fill">{{ facilities|join:", "|default:"&nbsp;" }}</span></div>
+
+  <div class="ts-month">{{ month_label }}</div>
+  <div class="ts-month-cap">(Month)</div>
+
+  <table class="ts-table">
+    <thead>
+      <tr><th style="width:22%;">Date</th><th style="width:18%;"># Hours Worked</th><th style="width:32%;">Facility</th><th style="width:28%;">Supervision</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.date|date:"n/j/Y" }}</td>
+        <td>{{ r.hours|floatformat:"-2" }}</td>
+        <td>{{ r.facility }}</td>
+        <td>{{ r.supervisor }}</td>
+      </tr>
+      {% endfor %}
+      {% for _ in blank_rows %}
+      <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
+      {% endfor %}
+      <tr class="ts-total">
+        <td>Total Hours</td>
+        <td>{{ total_hours|floatformat:"-2" }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="ts-cert">
+    I hereby certify to the accuracy of the information submitted above regarding my
+    provision of Services for Northside.
+  </div>
+  <div class="ts-sig">
+    <div>Physician Signature</div>
+    <div>Date</div>
+  </div>
+
+  <div class="ts-cert">
+    I hereby certify that: (i) to the best of my knowledge, information contained in
+    this timesheet is accurate; and (ii) meets the conditions for receiving compensation
+    for Services provided, including timely submission of this time record to Northside.
+  </div>
+  <div class="ts-sig">
+    <div>Responsible Manager</div>
+    <div>Date</div>
+  </div>
+</div>
+{% else %}
+<div class="card empty-state" style="max-width:760px;margin:0 auto;text-align:center;padding:2rem;">
+  No active locum physicians. <a href="/physicians/add/" style="color:var(--teal);">Add one</a> to generate reports.
+</div>
+{% endif %}
+{% endblock %}

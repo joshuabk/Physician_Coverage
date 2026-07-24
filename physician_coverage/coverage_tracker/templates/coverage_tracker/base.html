@@ -154,6 +154,7 @@
     <li><a href="/clinics/" {% if 'clinic' in request.resolver_match.url_name %}class="active"{% endif %}>Clinics</a></li>
     <li><a href="/calendar/" {% if request.resolver_match.url_name == 'calendar' %}class="active"{% endif %}>Calendar</a></li>
     <li><a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a></li>
+    <li><a href="/locum-reports/" {% if request.resolver_match.url_name == 'locum_reports' %}class="active"{% endif %}>Locum Reports</a></li>
     <li><a href="/users/" {% if 'user' in request.resolver_match.url_name %}class="active"{% endif %}>Users</a></li>
      <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
     {% endif %}

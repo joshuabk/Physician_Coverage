@@ -27,11 +27,8 @@
   .cal-initials-row { display:flex; flex-wrap:wrap; gap:3px; margin:1px 0 2px; }
   .cal-initials { background:var(--bg-3); border-radius:4px; padding:0 4px; font-size:10.5px; font-weight:600; line-height:16px; cursor:default; }
   .cal-initials.cal-out { color:var(--red); text-decoration:line-through; background:rgba(224,84,84,0.12); }
-  
-  .cal-name.cal-out { color:var(--red); text-decoration:line-through; }
   .cal-off-chip { color:var(--red); font-weight:600; font-size:10.5px; }
   .cal-half { color:var(--text-3); font-size:9px; font-weight:500; margin-left:1px; vertical-align:super; }
-  
 </style>
 
 <div class="grid" style="grid-template-columns: 1fr 320px; gap:1.5rem; align-items:start;">
@@ -116,7 +113,6 @@
         html += '<div class="text-muted" style="margin-bottom:10px;">No physicians scheduled.</div>';
       }
       day.clinics.forEach(function (c) {
-      
         html += '<div style="margin-bottom:10px;">';
         html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--amber);font-weight:600;margin-bottom:4px;">' + esc(c.name) + '</div>';
         c.staff.forEach(function (s) {
@@ -135,7 +131,7 @@
       if (day.off.length) {
         html += '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">';
         html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--red);margin-bottom:4px;">Off today</div>';
-       (day.off_detail || day.off.map(function (n) { return {name: n, psa: false}; })).forEach(function (o) {
+        (day.off_detail || day.off.map(function (n) { return {name: n, psa: false}; })).forEach(function (o) {
           html += '<div style="font-size:13px;padding:2px 0;color:' + (o.psa ? 'var(--psa)' : 'var(--teal)') + ';">' + esc(o.name) + (o.psa ? ' (PSA)' : '') + '</div>';
         });
         html += '</div>';
