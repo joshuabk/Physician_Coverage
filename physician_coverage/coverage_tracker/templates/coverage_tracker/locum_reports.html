@@ -21,10 +21,26 @@
   .ts-cert { font-size: 12px; margin-top: 22px; line-height: 1.5; }
   .ts-sig { display: flex; justify-content: space-between; margin-top: 34px; font-size: 12px; }
   .ts-sig div { width: 45%; border-top: 1px solid #111; padding-top: 4px; }
+  @page { size: letter; margin: 0.5in; }
   @media print {
     nav, .no-print, .messages { display: none !important; }
-    body { background: #fff !important; }
-    .ts-sheet { border-radius: 0; padding: 0; max-width: none; }
+    body { background: #fff !important; margin: 0 !important; }
+    .ts-sheet { border-radius: 0; padding: 0; max-width: none; box-shadow: none; }
+
+    /* Compact metrics so a typical month fits a single page */
+    .ts-line { margin: 3px 0; font-size: 12.5px; }
+    .ts-month { margin: 8px 0 1px; font-size: 13.5px; }
+    .ts-month-cap { margin-bottom: 8px; font-size: 10px; }
+    .ts-table { font-size: 11.5px; }
+    .ts-table th, .ts-table td { padding: 3px 6px; height: 18px; }
+    .ts-table th { font-size: 10px; }
+    .ts-cert { margin-top: 12px; font-size: 10.5px; line-height: 1.35; }
+    .ts-sig { margin-top: 20px; font-size: 10.5px; }
+
+    /* Break control: only spill to page 2 when rows truly demand it */
+    .ts-table thead { display: table-header-group; }   /* header repeats on page 2 */
+    .ts-table tr { page-break-inside: avoid; break-inside: avoid; }
+    .ts-certs { page-break-inside: avoid; break-inside: avoid; }
   }
 </style>
 
@@ -80,7 +96,7 @@
       </tr>
     </tbody>
   </table>
-
+ <div class="ts-certs">
   <div class="ts-cert">
     I hereby certify to the accuracy of the information submitted above regarding my
     provision of Services for Northside.
@@ -89,7 +105,7 @@
     <div>Physician Signature</div>
     <div>Date</div>
   </div>
-
+ <div class="ts-certs">
   <div class="ts-cert">
     I hereby certify that: (i) to the best of my knowledge, information contained in
     this timesheet is accurate; and (ii) meets the conditions for receiving compensation
