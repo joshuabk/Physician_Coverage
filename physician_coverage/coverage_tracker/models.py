@@ -54,51 +54,37 @@ def is_workday(d, holidays=None, extra_workdays=None):
         return True
     return d.weekday() < 5
 
-# ─── Fiscal year (vacation & CME pools reset every November 1) ───────────────
+# ─── Fiscal year (vacation & CME pools reset every January 1) ────────────────
 
-FISCAL_YEAR_START_MONTH = 11  # November
+FISCAL_YEAR_START_MONTH = 1  # January
 
 
 def fiscal_year_for(d):
-    """Fiscal year label for a date.
-
-    FY N runs Nov 1 of year N-1 through Oct 31 of year N.
-    e.g. Nov 1 2026 – Oct 31 2027 is FY2027, so on Nov 1 every physician's
-    used vacation/CME counts read as zero for the new fiscal year.
-    """
-    return d.year + 1 if d.month >= FISCAL_YEAR_START_MONTH else d.year
+    """Pools run on the calendar year: FY N is Jan 1 – Dec 31 of year N."""
+    return d.year
 
 
 def fiscal_year_range(year):
     """Inclusive (start, end) dates of fiscal year `year`."""
-    start = date(year - 1, FISCAL_YEAR_START_MONTH, 1)
-    end = date(year, FISCAL_YEAR_START_MONTH, 1) - datetime.timedelta(days=1)
-    return (start, end)
+    return (date(year, 1, 1), date(year, 12, 31))
 
 
 def current_fiscal_year():
     return fiscal_year_for(timezone.now().date())
 
-# ─── Locum-cost fiscal year (cost totals reset every October 1; FY ends 9/30) ─
+# ─── Locum-cost fiscal year (cost totals reset every January 1) ──────────────
 
-LOCUM_FY_START_MONTH = 10  # October
+LOCUM_FY_START_MONTH = 1  # January
 
 
 def locum_fiscal_year_for(d):
-    """Locum-cost fiscal year label for a date.
-
-    FY N runs Oct 1 of year N-1 through Sep 30 of year N.
-    e.g. Oct 1 2025 – Sep 30 2026 is FY2026, so on Oct 1 every locum's
-    hours/cost totals read as zero for the new fiscal year.
-    """
-    return d.year + 1 if d.month >= LOCUM_FY_START_MONTH else d.year
+    """Cost totals run on the calendar year: FY N is Jan 1 – Dec 31 of year N."""
+    return d.year
 
 
 def locum_fiscal_year_range(year):
     """Inclusive (start, end) dates of locum-cost fiscal year `year`."""
-    start = date(year - 1, LOCUM_FY_START_MONTH, 1)
-    end = date(year, LOCUM_FY_START_MONTH, 1) - datetime.timedelta(days=1)
-    return (start, end)
+    return (date(year, 1, 1), date(year, 12, 31))
 
 
 def current_locum_fiscal_year():

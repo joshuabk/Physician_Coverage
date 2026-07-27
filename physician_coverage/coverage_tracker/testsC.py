@@ -636,7 +636,7 @@ class UserManagementTests(TestCase):
 
 
 class FiscalYearTests(TestCase):
-    """Pools reset every November 1: FY N = Nov 1 (N-1) through Oct 31 (N)."""
+    """Vacation/CME pools run on the calendar year and reset every January 1."""
 
     def setUp(self):
         from .models import fiscal_year_for, fiscal_year_range
@@ -652,49 +652,50 @@ class FiscalYearTests(TestCase):
             start_date=start, end_date=end)
 
     def test_fiscal_year_label_boundaries(self):
-        self.assertEqual(self.fy_for(date(2026, 10, 31)), 2026)  # last day of FY2026
-        self.assertEqual(self.fy_for(date(2026, 11, 1)), 2027)   # reset day
+        self.assertEqual(self.fy_for(date(2026, 12, 31)), 2026)  # last day of FY2026
+        self.assertEqual(self.fy_for(date(2027, 1, 1)), 2027)    # reset day
         self.assertEqual(self.fy_for(date(2026, 7, 10)), 2026)
-        self.assertEqual(self.fy_for(date(2027, 1, 15)), 2027)
+        self.assertEqual(self.fy_for(date(2026, 11, 1)), 2026)   # Nov now stays in-year
 
     def test_fiscal_year_range(self):
         self.assertEqual(self.fy_range(2027),
-                         (date(2026, 11, 1), date(2027, 10, 31)))
+                         (date(2027, 1, 1), date(2027, 12, 31)))
 
-    def test_vacation_resets_on_nov_1(self):
+    def test_vacation_resets_on_jan_1(self):
         # 3 vacation days in August 2026 -> FY2026
         self._req('vacation', date(2026, 8, 3), date(2026, 8, 5))
-        # 2 vacation days in November 2026 -> FY2027 (after the reset)
-        self._req('vacation', date(2026, 11, 2), date(2026, 11, 3))
+        # 2 vacation days in January 2027 -> FY2027 (after the reset)
+        self._req('vacation', date(2027, 1, 4), date(2027, 1, 5))
         self.assertEqual(self.p.days_taken(2026), 3)
         self.assertEqual(self.p.days_remaining(2026), 17)
         self.assertEqual(self.p.days_taken(2027), 2)   # only post-reset days
         self.assertEqual(self.p.days_remaining(2027), 18)
 
     def test_sick_resets_too(self):
-        self._req('sick', date(2026, 10, 29), date(2026, 10, 30))  # FY2026
-        self._req('sick', date(2026, 11, 2), date(2026, 11, 2))    # FY2027 (Nov 1 is a Sunday; Mon Nov 2 is the first workday)
+        self._req('sick', date(2026, 12, 30), date(2026, 12, 31))  # Wed-Thu, FY2026
+        self._req('sick', date(2027, 1, 4), date(2027, 1, 4))      # Mon, FY2027
         self.assertEqual(self.p.days_taken(2026), 2)
         self.assertEqual(self.p.days_taken(2027), 1)
 
-    def test_cme_resets_on_nov_1(self):
+    def test_cme_resets_on_jan_1(self):
         self._req('conference', date(2026, 9, 14), date(2026, 9, 16))  # FY2026: 3
-        self._req('conference', date(2026, 11, 2), date(2026, 11, 3))  # FY2027: 2
+        self._req('conference', date(2027, 1, 4), date(2027, 1, 5))    # FY2027: 2
         self.assertEqual(self.p.cme_days_taken(2026), 3)
         self.assertEqual(self.p.cme_days_remaining(2026), 2)
         self.assertEqual(self.p.cme_days_taken(2027), 2)
         self.assertEqual(self.p.cme_days_remaining(2027), 3)  # fresh 5-day pool
 
-    def test_oct_30_vs_nov_2_split(self):
-        self._req('vacation', date(2026, 10, 30), date(2026, 10, 30))  # Fri, FY2026
-        self._req('vacation', date(2026, 11, 2), date(2026, 11, 2))    # Mon, FY2027
+    def test_dec_31_vs_jan_4_split(self):
+        self._req('vacation', date(2026, 12, 31), date(2026, 12, 31))  # Thu, FY2026
+        self._req('vacation', date(2027, 1, 4), date(2027, 1, 4))      # Mon, FY2027
         self.assertEqual(self.p.days_taken(2026), 1)
         self.assertEqual(self.p.days_taken(2027), 1)
 
     def test_request_spanning_reset_charges_to_start_fy(self):
-        # Wed Oct 28 - Tue Nov 3 2026 spans the reset; whole request charges
-        # to FY2026 because it STARTS before Nov 1 (start-date rule).
-        r = self._req('vacation', date(2026, 10, 28), date(2026, 11, 3))
+        # Mon Dec 28 2026 - Mon Jan 4 2027 spans the reset; whole request
+        # charges to FY2026 because it STARTS before Jan 1 (start-date rule).
+        # Workdays: Dec 28-31 (Mon-Thu) + Jan 4 (Mon) = 5; Jan 1 is a holiday.
+        r = self._req('vacation', date(2026, 12, 28), date(2027, 1, 4))
         self.assertEqual(r.duration_days, 5)
         self.assertEqual(self.p.days_taken(2026), 5)
         self.assertEqual(self.p.days_taken(2027), 0)
@@ -703,13 +704,13 @@ class FiscalYearTests(TestCase):
         from .models import current_fiscal_year
         fy = current_fiscal_year()
         self._req('vacation', date(2026, 8, 3), date(2026, 8, 3))
-        # Today is July 2026 -> current FY is 2026, so defaults see the request
+        # Today is 2026 -> current FY is 2026, so defaults see the request
         self.assertEqual(fy, 2026)
         self.assertEqual(self.p.days_taken(), 1)
         self.assertEqual(self.p.days_remaining(), 19)
 
     def test_pending_uses_fiscal_year(self):
-        self._req('vacation', date(2026, 11, 2), date(2026, 11, 3),
+        self._req('vacation', date(2027, 1, 4), date(2027, 1, 5),
                   status='pending')
         self.assertEqual(self.p.days_pending(2026), 0)
         self.assertEqual(self.p.days_pending(2027), 2)
@@ -720,10 +721,10 @@ class FiscalYearTests(TestCase):
         c.force_login(admin)
         r = c.get('/')
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.context['year'], 2026)  # FY2026 in July 2026
-        self.assertEqual(r.context['fy_start'], date(2025, 11, 1))
-        self.assertEqual(r.context['fy_end'], date(2026, 10, 31))
-        self.assertContains(r, 'resets Nov 1')
+        self.assertEqual(r.context['year'], 2026)  # calendar 2026
+        self.assertEqual(r.context['fy_start'], date(2026, 1, 1))
+        self.assertEqual(r.context['fy_end'], date(2026, 12, 31))
+        self.assertContains(r, 'resets Jan 1')
 
     def test_dashboard_next_fiscal_year_shows_reset_balances(self):
         self._req('vacation', date(2026, 8, 3), date(2026, 8, 7))  # 5d in FY2026
