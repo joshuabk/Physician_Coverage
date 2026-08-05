@@ -658,7 +658,7 @@ class UserProfile(models.Model):
         ('admin', 'Administrator'),
         ('physician_admin', 'Physician Administrator'),
         ('physician', 'Physician'),
-        ('nursing', 'Nursing'),
+        ('nursing', 'Clinical'),
     ]
     SCOPE_CHOICES = [
         ('nroc', 'NROC Physicians'),

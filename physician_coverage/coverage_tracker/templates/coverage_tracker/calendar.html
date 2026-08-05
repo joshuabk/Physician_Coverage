@@ -14,21 +14,15 @@
 
 <style>
   .cal-table { width:100%; border-collapse:collapse; table-layout:fixed; }
-  .cal-table th { padding:6px 4px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3); border-bottom:1px solid var(--border); }
-  .cal-cell { vertical-align:top; border:1px solid var(--border); padding:5px 6px; height:108px; cursor:pointer; transition:background 0.1s; }
+  .cal-table th { padding:4px 3px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-3); border-bottom:1px solid var(--border); }
+  .cal-cell { vertical-align:top; border:1px solid var(--border); padding:3px 4px; height:44px; cursor:pointer; transition:background 0.1s; }
   .cal-cell:hover { background:var(--bg-3); }
   .cal-cell.cal-selected { outline:2px solid var(--teal); outline-offset:-2px; }
   .cal-cell.cal-other { opacity:0.38; }
   .cal-cell.cal-nonwork { background:rgba(127,127,127,0.07); cursor:default; }
-  .cal-daynum { font-size:12.5px; font-weight:600; margin-bottom:3px; }
-  .cal-daynum .cal-today-dot { display:inline-block; background:var(--teal); color:#fff; border-radius:50%; width:20px; height:20px; line-height:20px; text-align:center; }
-  .cal-scroll { max-height:76px; overflow:hidden; font-size:11px; line-height:1.45; }
-  .cal-clinic { color:var(--text-3); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.4px; margin-top:2px; }
-  .cal-initials-row { display:flex; flex-wrap:wrap; gap:3px; margin:1px 0 2px; }
-  .cal-initials { background:var(--bg-3); border-radius:4px; padding:0 4px; font-size:10.5px; font-weight:600; line-height:16px; cursor:default; }
-  .cal-initials.cal-out { color:var(--red); text-decoration:line-through; background:rgba(224,84,84,0.12); }
-  .cal-off-chip { color:var(--red); font-weight:600; font-size:10.5px; }
-  .cal-half { color:var(--text-3); font-size:9px; font-weight:500; margin-left:1px; vertical-align:super; }
+  .cal-daynum { font-size:11.5px; font-weight:600; margin-bottom:2px; }
+  .cal-daynum .cal-today-dot { display:inline-block; background:var(--teal); color:#fff; border-radius:50%; width:17px; height:17px; line-height:17px; text-align:center; }
+  .cal-off-chip { color:var(--red); font-weight:600; font-size:10px; }
 </style>
 
 <div class="grid" style="grid-template-columns: 1fr 320px; gap:1.5rem; align-items:start;">
@@ -46,17 +40,6 @@
             <div class="cal-daynum">
               {% if cell.is_today %}<span class="cal-today-dot">{{ cell.date.day }}</span>{% else %}{{ cell.date.day }}{% endif %}
               {% if cell.off %}<span class="cal-off-chip"> {{ cell.off|length }} off</span>{% endif %}
-            </div>
-            <div class="cal-scroll">
-              {% for group in cell.clinics %}
-                <div class="cal-clinic">{{ group.clinic.name }}</div>
-                <div class="cal-initials-row">
-                  {% for s in group.staff %}
-                    <span class="cal-initials {% if s.out %}cal-out{% endif %}"
-                          title="{{ s.name }}{% if s.psa %} (PSA){% endif %} — {{ s.label }}{% if s.out %} — Out{% endif %}{% if s.reassigned %} — Reassigned{% endif %}">{{ s.initials }}{% if s.label != 'Full day' %}<span class="cal-half">{{ s.label }}</span>{% endif %}</span>
-                  {% endfor %}
-                </div>
-              {% endfor %}
             </div>
           </td>
           {% endfor %}
@@ -124,6 +107,7 @@
           html += '<span class="badge" style="background:var(--bg-3);color:var(--text-2);">' + esc(s.label) + '</span>';
           if (s.reassigned) html += '<span class="badge" style="background:rgba(245,166,35,0.18);color:var(--amber);">Reassigned</span>';
           if (s.out) html += '<span class="badge badge-off">Out</span>';
+          if (s.out && s.covered_by) html += '<span style="font-size:12px;color:var(--green);">\u21b3 ' + esc(s.covered_by) + '</span>';
           html += '</div>';
         });
         html += '</div>';
@@ -133,6 +117,7 @@
         html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--red);margin-bottom:4px;">Off today</div>';
         (day.off_detail || day.off.map(function (n) { return {name: n, psa: false}; })).forEach(function (o) {
           html += '<div style="font-size:13px;padding:2px 0;color:' + (o.psa ? 'var(--psa)' : 'var(--teal)') + ';">' + esc(o.name) + (o.psa ? ' (PSA)' : '') + '</div>';
+          if (o.covered_by) html += '<div style="font-size:12px;padding:0 0 3px 14px;color:var(--green);">↳ Covered by ' + esc(o.covered_by) + '</div>';
         });
         html += '</div>';
       }

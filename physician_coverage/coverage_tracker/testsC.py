@@ -1096,7 +1096,7 @@ class CalendarViewTests(TestCase):
         doc = make_user('caldoc', role='physician', scope='nroc')
         c3 = Client()
         c3.force_login(doc)
-        self.assertEqual(c3.get('/calendar/').status_code, 302)  # bounced
+        self.assertEqual(c3.get('/calendar/').status_code, 200)   # bounced
 
 
 class LocumReportTests(TestCase):

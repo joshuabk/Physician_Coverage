@@ -962,7 +962,7 @@ def delete_reassignment(request, pk):
     return redirect(back)
 
 
-@clinic_access_required
+@login_required_custom
 def calendar_view(request):
     """Monthly calendar: who is scheduled at which clinic each day, and who
     is off. Clicking a day shows the full per-clinic summary for that day.
@@ -1022,6 +1022,15 @@ def calendar_view(request):
             off_by_date.setdefault(d, set()).add(req.physician)
             d += timedelta(days=1)
 
+    # Locum coverage: date -> {covered_physician_id: covering locum}
+    cover_by_date = {}
+    for ca in CoverageAssignment.objects.filter(
+            date__gte=span_start, date__lte=span_end,
+            covering_physician__isnull=False,
+            covered_physician__isnull=False,
+            ).select_related('covering_physician', 'covered_physician'):
+        cover_by_date.setdefault(ca.date, {})[ca.covered_physician_id] = ca.covering_physician
+
     holidays, extra = set(), set()
     for y in {span_start.year, span_end.year}:
         holidays |= set(get_holidays(y))
@@ -1077,6 +1086,7 @@ def calendar_view(request):
             if workday:
                 by_clinic, reassigned_slots = staffing_for(day)
                 off_today = off_by_date.get(day, set())
+                covers = cover_by_date.get(day, {})
                 for c in clinics:
                     people = by_clinic.get(c.id)
                     if not people:
@@ -1091,6 +1101,9 @@ def calendar_view(request):
                             'label': ('Full day' if sessions >= {'am', 'pm'}
                                       else ('AM' if 'am' in sessions else 'PM')),
                             'out': p in off_today,
+                            'covered_by': (str(covers[p.id])
+                                           if p in off_today and p.id in covers
+                                           else None),
                             'psa': p.is_psa,
                             'reassigned': any(
                                 (p.id, ss, c.id) in reassigned_slots
@@ -1104,7 +1117,9 @@ def calendar_view(request):
                 cell['off'] = off_sorted
                 summary['off'] = [str(p) for p in off_sorted]
                 summary['off_detail'] = [
-                    {'name': str(p), 'psa': p.is_psa} for p in off_sorted]
+                    {'name': str(p), 'psa': p.is_psa,
+                     'covered_by': str(covers[p.id]) if p.id in covers else None}
+                    for p in off_sorted]
             day_summaries[day.isoformat()] = summary
             row.append(cell)
         weeks_data.append(row)
