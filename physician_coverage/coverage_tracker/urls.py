@@ -47,6 +47,7 @@ urlpatterns = [
     path('availability/', views.availability_view, name='availability'),
     path('availability/mark/', views.mark_availability, name='mark_availability'),
     path('availability/update/', views.update_availability, name='update_availability'),
+    path('availability/note/', views.update_availability_note, name='update_availability_note'),
 
     # User Management (admin only)
     path('users/', views.user_management, name='user_management'),

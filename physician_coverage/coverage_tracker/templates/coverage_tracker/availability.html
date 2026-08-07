@@ -34,19 +34,31 @@
     {% for row in grid %}
     <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);min-width:900px;"
          onmouseover="this.style.background='var(--card-hover)'" onmouseout="this.style.background=''">
-      <div style="min-width:190px;padding:8px;display:flex;align-items:center;gap:8px;">
-        <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;
+      <div style="min-width:190px;max-width:190px;padding:8px;display:flex;align-items:flex-start;gap:8px;">
+        <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;
           {% if row.physician.physician_type == 'locum' %}background:rgba(155,89,182,0.25); color:#c39bd3;
           {% elif row.physician.physician_type == 'psa' %}background:var(--psa-bg);color:var(--psa);
           {% else %}background:rgba(0,184,169,0.2);color:var(--teal);{% endif %}">
           {{ row.physician.first_name.0 }}{{ row.physician.last_name.0 }}
         </div>
-        <div>
+        <div style="min-width:0;">
           <a href="/physicians/{{ row.physician.pk }}/" style="font-size:13px;font-weight:500;color:var(--text);text-decoration:none;">
             Dr. {{ row.physician.last_name }}
           </a>
           <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.3px;">
             {% if row.physician.physician_type == 'locum' %}Locum Physician{% else %}{{ row.physician.get_physician_type_display }}{% endif %}
+          </div>
+          <!-- Availability note -->
+          <div class="phys-note" data-physician="{{ row.physician.pk }}" data-note="{{ row.physician.availability_notes }}">
+            <div class="phys-note-display" onclick="editNote(this)"
+                 title="{% if row.physician.availability_notes %}{{ row.physician.availability_notes }} — click to edit{% else %}Click to add a note{% endif %}"
+                 style="margin-top:3px;font-size:11px;line-height:1.35;cursor:pointer;border-radius:4px;padding:1px 3px;margin-left:-3px;
+                   {% if row.physician.availability_notes %}color:var(--amber);{% else %}color:var(--text-3);opacity:0.55;font-style:italic;{% endif %}">
+              <span class="phys-note-text">{% if row.physician.availability_notes %}📝 {{ row.physician.availability_notes|truncatechars:70 }}{% else %}+ add note{% endif %}</span>
+            </div>
+            <textarea class="phys-note-input" maxlength="500" rows="2" placeholder="e.g. Out until October — maternity leave"
+              style="display:none;margin-top:3px;width:100%;box-sizing:border-box;font-size:11px;font-family:inherit;
+                     background:var(--card);color:var(--text);border:1px solid var(--border-2);border-radius:5px;padding:4px 6px;resize:vertical;"></textarea>
           </div>
         </div>
       </div>
@@ -205,6 +217,75 @@ function doUpdate(cell, badge, newStatus) {
   .then(r => r.json())
   .then(data => { if (data.error) alert('Server error: ' + data.error); })
   .catch(() => alert('Network error — please refresh the page.'));
+}
+
+// ---- Availability notes (per-locum free-text) ----
+function editNote(displayEl) {
+  const wrap = displayEl.closest('.phys-note');
+  const input = wrap.querySelector('.phys-note-input');
+  input.value = wrap.dataset.note || '';
+  displayEl.style.display = 'none';
+  input.style.display = 'block';
+  input.focus();
+
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.onblur = null; closeNoteEditor(wrap, false); }
+  };
+  input.onblur = () => saveNote(wrap);
+}
+
+function closeNoteEditor(wrap, save) {
+  const input = wrap.querySelector('.phys-note-input');
+  const display = wrap.querySelector('.phys-note-display');
+  input.style.display = 'none';
+  display.style.display = 'block';
+}
+
+function renderNote(wrap, note) {
+  wrap.dataset.note = note;
+  const display = wrap.querySelector('.phys-note-display');
+  const textEl = wrap.querySelector('.phys-note-text');
+  if (note) {
+    textEl.textContent = '📝 ' + (note.length > 70 ? note.slice(0, 69) + '…' : note);
+    display.style.color = 'var(--amber)';
+    display.style.opacity = '';
+    display.style.fontStyle = '';
+    display.title = note + ' — click to edit';
+  } else {
+    textEl.textContent = '+ add note';
+    display.style.color = 'var(--text-3)';
+    display.style.opacity = '0.55';
+    display.style.fontStyle = 'italic';
+    display.title = 'Click to add a note';
+  }
+}
+
+function saveNote(wrap) {
+  const input = wrap.querySelector('.phys-note-input');
+  const newNote = input.value.trim();
+  const oldNote = wrap.dataset.note || '';
+  closeNoteEditor(wrap, true);
+  if (newNote === oldNote) return;  // nothing changed
+
+  renderNote(wrap, newNote);  // optimistic update
+
+  fetch('/availability/note/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+    body: JSON.stringify({ physician_id: wrap.dataset.physician, note: newNote })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      alert('Could not save note: ' + data.error);
+      renderNote(wrap, oldNote);  // roll back
+    }
+  })
+  .catch(() => {
+    alert('Network error — note not saved.');
+    renderNote(wrap, oldNote);
+  });
 }
 
 function iconSVG(status) {

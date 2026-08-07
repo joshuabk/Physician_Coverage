@@ -125,6 +125,10 @@ class Physician(models.Model):
         max_length=200, blank=True,
         help_text="Staffing agency name (for locum physicians)"
     )
+    availability_notes = models.TextField(
+        blank=True,
+        help_text="Free-text availability note shown on the availability page (e.g. 'Out until October — maternity leave')."
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

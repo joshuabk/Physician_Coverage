@@ -1484,6 +1484,31 @@ def availability_view(request):
 
 
 @admin_required
+def update_availability_note(request):
+    """AJAX endpoint: save a free-text availability note for a physician."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required.'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON body.'}, status=400)
+
+    try:
+        physician = Physician.objects.get(pk=data.get('physician_id'), is_active=True)
+    except (Physician.DoesNotExist, ValueError, TypeError):
+        return JsonResponse({'error': 'Physician not found.'}, status=404)
+
+    note = (data.get('note') or '').strip()
+    if len(note) > 500:
+        return JsonResponse({'error': 'Note is too long (500 characters max).'}, status=400)
+
+    physician.availability_notes = note
+    physician.save(update_fields=['availability_notes'])
+    return JsonResponse({'ok': True, 'note': note})
+
+
+@admin_required
 def update_availability(request):
     """AJAX endpoint: set a physician's availability for a specific date."""
     if request.method != 'POST':
