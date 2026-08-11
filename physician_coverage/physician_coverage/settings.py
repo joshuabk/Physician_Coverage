@@ -85,7 +85,7 @@ SEND_NOTIFICATION_EMAILS = False
 # Who gets notified when a new time-off request is submitted.
 # Add the recipients here, e.g. ['scheduler@northside.org', 'office@northside.org']
 TIME_OFF_NOTIFICATION_RECIPIENTS = [
-    # 'someone@example.com',
+     'Joshua.Kessler@northside.com', 'ellen.herron@northside.com'
 ]
 
 # SMTP settings — only used when SEND_NOTIFICATION_EMAILS is True.
