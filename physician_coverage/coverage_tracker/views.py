@@ -534,8 +534,8 @@ def _oncall_conflicts_for_request(physician, start_date, end_date):
     return warnings
 
 
-def _notify_time_off_submitted(req, submitted_by=None):
-    """Email the notification list when a new time-off request is submitted.
+def _send_time_off_email(subject, body):
+    """Send a notification email to the time-off list.
 
     Controlled by two settings (physician_coverage/settings.py):
       - SEND_NOTIFICATION_EMAILS: master switch. False in development, so
@@ -548,25 +548,9 @@ def _notify_time_off_submitted(req, submitted_by=None):
     recipients = getattr(settings, 'TIME_OFF_NOTIFICATION_RECIPIENTS', [])
     if not recipients:
         return
-
-    group = 'NROC' if req.physician.is_regular else ('PSA' if req.physician.is_psa else 'Locum')
-    body = (
-        f"A new time off request has been submitted.\n\n"
-        f"Physician:  Dr. {req.physician.first_name} {req.physician.last_name} ({group})\n"
-        f"Type:       {req.get_request_type_display()}\n"
-        f"Dates:      {req.start_date:%b %d, %Y} – {req.end_date:%b %d, %Y}\n"
-        f"Work days:  {req.duration_days}\n"
-        f"Status:     Pending approval\n"
-    )
-    if req.notes:
-        body += f"Notes:      {req.notes}\n"
-    if submitted_by:
-        body += f"\nSubmitted by: {submitted_by}\n"
-
     try:
         email = EmailMessage(
-            f"New Time Off Request — Dr. {req.physician.last_name} "
-            f"({req.start_date:%b %d} – {req.end_date:%b %d})",
+            subject,
             body,
             settings.EMAIL_HOST_USER,
             recipients)
@@ -580,8 +564,57 @@ def _notify_time_off_submitted(req, submitted_by=None):
             email.send()
             print('mail suppressed (SEND_NOTIFICATION_EMAILS is False) — printed above instead')
     except Exception as e:
-        # Never let an email failure break the submission
+        # Never let an email failure break the submission/approval
         print(f'time-off notification email failed: {e}')
+
+
+def _time_off_request_lines(req):
+    """The core facts of a request, shared by all time-off emails."""
+    group = 'NROC' if req.physician.is_regular else ('PSA' if req.physician.is_psa else 'Locum')
+    lines = (
+        f"Physician:  Dr. {req.physician.first_name} {req.physician.last_name} ({group})\n"
+        f"Type:       {req.get_request_type_display()}\n"
+        f"Dates:      {req.start_date:%b %d, %Y} – {req.end_date:%b %d, %Y}\n"
+        f"Work days:  {req.duration_days}\n"
+    )
+    if req.notes:
+        lines += f"Notes:      {req.notes}\n"
+    return lines
+
+
+def _notify_time_off_submitted(req, submitted_by=None):
+    """Email the notification list when a new time-off request is submitted."""
+    body = (
+        "A new time off request has been submitted.\n\n"
+        + _time_off_request_lines(req)
+        + "Status:     Pending approval\n"
+    )
+    if submitted_by:
+        body += f"\nSubmitted by: {submitted_by}\n"
+    _send_time_off_email(
+        f"New Time Off Request — Dr. {req.physician.last_name} "
+        f"({req.start_date:%b %d} – {req.end_date:%b %d})",
+        body)
+
+
+def _notify_time_off_decision(req, decision, decided_by=None):
+    """Email the notification list when a request is approved or denied.
+
+    `decision` is 'approved' or 'denied' — both the subject line and the body
+    state clearly which one it is.
+    """
+    label = 'Approved' if decision == 'approved' else 'Denied'
+    body = (
+        f"A time off request has been {label.upper()}.\n\n"
+        + _time_off_request_lines(req)
+        + f"Status:     {label}\n"
+    )
+    if decided_by:
+        body += f"\n{label} by: {decided_by}\n"
+    _send_time_off_email(
+        f"Time Off {label} — Dr. {req.physician.last_name} "
+        f"({req.start_date:%b %d} – {req.end_date:%b %d})",
+        body)
 
 
 @login_required_custom
@@ -709,6 +742,12 @@ def edit_time_off(request, pk):
                     'oncall_warnings': oncall_warnings,
                 })
             updated = form.save()
+            # If an edit flipped the status to approved or denied, notify the email list too
+            if updated.status in ('approved', 'denied') and old_status != updated.status:
+                _notify_time_off_decision(
+                    updated, updated.status,
+                    decided_by=request.user.get_full_name() or request.user.username,
+                )
             # If status changed TO cancelled or denied, remove coverage assignments
             if updated.status in ('cancelled', 'denied') and old_status not in ('cancelled', 'denied'):
                 removed = _remove_coverage_for_request(updated)
@@ -777,8 +816,14 @@ def approve_time_off(request, pk):
     if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
         messages.error(request, 'You can only approve requests for physicians in your group.')
         return redirect('time_off_list')
+    already_approved = req.status == 'approved'
     req.status = 'approved'
     req.save()
+    if not already_approved:
+        _notify_time_off_decision(
+            req, 'approved',
+            decided_by=request.user.get_full_name() or request.user.username,
+        )
     messages.success(request, f'Approved time off for {req.physician}.')
     return redirect('time_off_list')
 
@@ -792,8 +837,14 @@ def deny_time_off(request, pk):
     if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
         messages.error(request, 'You can only deny requests for physicians in your group.')
         return redirect('time_off_list')
+    already_denied = req.status == 'denied'
     req.status = 'denied'
     req.save()
+    if not already_denied:
+        _notify_time_off_decision(
+            req, 'denied',
+            decided_by=request.user.get_full_name() or request.user.username,
+        )
     messages.warning(request, f'Denied time off for {req.physician}.')
     return redirect('time_off_list')
 
