@@ -534,7 +534,32 @@ def _oncall_conflicts_for_request(physician, start_date, end_date):
     return warnings
 
 
-def _send_time_off_email(subject, body):
+def _group_admin_emails(physician):
+    """Emails of the physician administrators responsible for this physician's group.
+
+    An NROC physician's requests notify physician admins with scope 'nroc'
+    (or 'all'); a PSA physician's notify scope 'psa' (or 'all'). Uses the
+    admin login's email address, falling back to their linked physician
+    record's email if the login has none.
+    """
+    if physician.is_regular:
+        scopes = ('nroc', 'all')
+    elif physician.is_psa:
+        scopes = ('psa', 'all')
+    else:
+        return []
+    emails = []
+    admins = UserProfile.objects.filter(
+        role='physician_admin', scope__in=scopes,
+    ).select_related('user', 'physician')
+    for prof in admins:
+        addr = (prof.user.email or (prof.physician.email if prof.physician else '')).strip()
+        if addr and addr not in emails:
+            emails.append(addr)
+    return emails
+
+
+def _send_time_off_email(subject, body, extra_recipients=None):
     """Send a notification email to the time-off list.
 
     Controlled by two settings (physician_coverage/settings.py):
@@ -543,9 +568,15 @@ def _send_time_off_email(subject, body):
         Set to True on the production server.
       - TIME_OFF_NOTIFICATION_RECIPIENTS: list of addresses to notify.
 
+    `extra_recipients` (e.g. the group's physician admin) are added on top
+    of the settings list, deduplicated.
+
     Never raises — an email problem should never block the request itself.
     """
-    recipients = getattr(settings, 'TIME_OFF_NOTIFICATION_RECIPIENTS', [])
+    recipients = list(getattr(settings, 'TIME_OFF_NOTIFICATION_RECIPIENTS', []))
+    for addr in (extra_recipients or []):
+        if addr not in recipients:
+            recipients.append(addr)
     if not recipients:
         return
     try:
@@ -594,6 +625,52 @@ def _notify_time_off_submitted(req, submitted_by=None):
     _send_time_off_email(
         f"New Time Off Request — Dr. {req.physician.last_name} "
         f"({req.start_date:%b %d} – {req.end_date:%b %d})",
+        body,
+        extra_recipients=_group_admin_emails(req.physician))
+
+
+def _notify_locum_assigned(assignments, assigned_by=None, covered_physician=None):
+    """Email the main notification list when locum coverage is assigned.
+
+    `assignments` is a list of CoverageAssignment rows. Rows without a
+    covering locum (e.g. 'no coverage needed' markers) are ignored; if
+    nothing is left, no email is sent. One summary email covers the whole
+    save, listing each day with its locum and clinic.
+    """
+    assignments = [a for a in assignments if a.covering_physician_id]
+    if not assignments:
+        return
+    assignments = sorted(assignments, key=lambda a: a.date)
+
+    day_lines = ''
+    for a in assignments:
+        line = (f"{a.date:%a, %b %d, %Y}:  "
+                f"Dr. {a.covering_physician.first_name} {a.covering_physician.last_name} "
+                f"at {a.clinic.name}")
+        if a.covered_physician_id:
+            line += f" (covering Dr. {a.covered_physician.last_name})"
+        if a.hours is not None:
+            line += f" — {a.hours} hrs"
+        day_lines += line + "\n"
+
+    locums = {a.covering_physician_id: a.covering_physician for a in assignments}
+    if len(locums) == 1:
+        locum = next(iter(locums.values()))
+        who = f"Dr. {locum.first_name} {locum.last_name}"
+    else:
+        who = f"{len(locums)} locums"
+
+    body = "Locum coverage has been assigned.\n\n"
+    if covered_physician is not None:
+        body += (f"Covering for: Dr. {covered_physician.first_name} "
+                 f"{covered_physician.last_name}\n\n")
+    body += day_lines
+    if assigned_by:
+        body += f"\nAssigned by: {assigned_by}\n"
+
+    n = len(assignments)
+    _send_time_off_email(
+        f"Locum Assigned — {who} ({n} day{'s' if n != 1 else ''})",
         body)
 
 
@@ -1295,8 +1372,9 @@ def assign_day_coverage(request):
                 existing.no_coverage_needed = False
                 existing.no_coverage_reason = ''
                 existing.save()
+                saved_assignment = existing
             else:
-                CoverageAssignment.objects.create(
+                saved_assignment = CoverageAssignment.objects.create(
                     clinic=clinic,
                     covering_physician=locum,
                     covered_physician=physician,
@@ -1311,6 +1389,11 @@ def assign_day_coverage(request):
             f'{target_date:%b %d}. Pick a different locum.')
         return redirect(back)
 
+    _notify_locum_assigned(
+        [saved_assignment],
+        assigned_by=request.user.get_full_name() or request.user.username,
+        covered_physician=physician,
+    )
     messages.success(
         request,
         f'{locum} assigned to cover {physician} at {clinic.name} on '
@@ -1354,7 +1437,12 @@ def add_coverage(request):
     if request.method == 'POST':
         form = CoverageAssignmentForm(request.POST)
         if form.is_valid():
-            form.save()
+            assignment = form.save()
+            _notify_locum_assigned(
+                [assignment],
+                assigned_by=request.user.get_full_name() or request.user.username,
+                covered_physician=assignment.covered_physician,
+            )
             messages.success(request, 'Coverage assignment added.')
             return redirect('clinic_list')
     else:
@@ -1782,6 +1870,7 @@ def assign_locum_to_time_off(request, pk):
         locums = {p.pk: p for p in Physician.objects.filter(is_active=True, physician_type='locum')}
         saved = 0
         errors = []
+        locum_assignments = []  # rows saved this submit, for the notification email
 
         for day in all_dates:
             date_key = day.strftime('%Y-%m-%d')
@@ -1884,11 +1973,12 @@ def assign_locum_to_time_off(request, pk):
                 existing.clinic = clinic
                 existing.hours = hours_value
                 existing.no_coverage_needed = False                     # ← NEW
-                existing.no_coverage_reason = '' 
+                existing.no_coverage_reason = ''
                 existing.save()
                 saved += 1
+                locum_assignments.append(existing)
             else:
-                CoverageAssignment.objects.create(
+                created = CoverageAssignment.objects.create(
                     clinic=clinic,
                     covering_physician=locum,
                     covered_physician=req.physician,
@@ -1897,6 +1987,14 @@ def assign_locum_to_time_off(request, pk):
                     notes=f'Assigned for time off: {req.start_date} – {req.end_date}',
                 )
                 saved += 1
+                locum_assignments.append(created)
+
+        # Notify the main email list about any locum days saved this submit
+        _notify_locum_assigned(
+            locum_assignments,
+            assigned_by=request.user.get_full_name() or request.user.username,
+            covered_physician=req.physician,
+        )
         if errors:
             for err in errors:
                 messages.error(request, err)
