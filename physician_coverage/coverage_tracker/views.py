@@ -599,6 +599,56 @@ def _send_time_off_email(subject, body, extra_recipients=None):
         print(f'time-off notification email failed: {e}')
 
 
+def _clinics_for_request(req):
+    """Unique clinic names the physician is scheduled to work at during the
+    request's business days — i.e. the clinics that would need coverage.
+
+    Uses the weekly schedule grid when the physician is managed by it
+    (respecting any single-day reassignments in the window), and falls back
+    to the legacy clinic affiliation list otherwise.
+    """
+    phys = req.physician
+    days = req.workdays()
+    if not days:
+        return []
+
+    names = []
+
+    def add(clinic):
+        if clinic is not None and clinic.name not in names:
+            names.append(clinic.name)
+
+    # Single-day location overrides inside the window
+    reassigned = {}
+    for r in DayReassignment.objects.filter(
+            physician=phys, date__in=days).select_related('clinic'):
+        reassigned.setdefault(r.date, []).append(r)
+
+    if phys.has_weekly_schedule():
+        weekly = {}  # weekday -> {session: clinic}
+        for row in phys.clinic_schedule.select_related('clinic'):
+            weekly.setdefault(row.day_of_week, {})[row.session] = row.clinic
+        for d in days:
+            overrides = reassigned.get(d, [])
+            full = next((r for r in overrides if r.session == 'full'), None)
+            if full:
+                add(full.clinic)
+                continue
+            sessions = dict(weekly.get(d.weekday(), {}))
+            for r in overrides:
+                sessions[r.session] = r.clinic
+            add(sessions.get('am'))
+            add(sessions.get('pm'))
+    else:
+        for d in days:
+            for r in reassigned.get(d, []):
+                add(r.clinic)
+        for clinic in phys.assigned_clinics.filter(is_active=True):
+            add(clinic)
+
+    return names
+
+
 def _time_off_request_lines(req):
     """The core facts of a request, shared by all time-off emails."""
     group = 'NROC' if req.physician.is_regular else ('PSA' if req.physician.is_psa else 'Locum')
@@ -608,6 +658,9 @@ def _time_off_request_lines(req):
         f"Dates:      {req.start_date:%b %d, %Y} – {req.end_date:%b %d, %Y}\n"
         f"Work days:  {req.duration_days}\n"
     )
+    clinics = _clinics_for_request(req)
+    if clinics:
+        lines += f"Clinics:    {', '.join(clinics)}\n"
     if req.notes:
         lines += f"Notes:      {req.notes}\n"
     return lines
@@ -660,10 +713,16 @@ def _notify_locum_assigned(assignments, assigned_by=None, covered_physician=None
     else:
         who = f"{len(locums)} locums"
 
+    clinic_names = []
+    for a in assignments:
+        if a.clinic and a.clinic.name not in clinic_names:
+            clinic_names.append(a.clinic.name)
+
     body = "Locum coverage has been assigned.\n\n"
     if covered_physician is not None:
         body += (f"Covering for: Dr. {covered_physician.first_name} "
-                 f"{covered_physician.last_name}\n\n")
+                 f"{covered_physician.last_name}\n")
+    body += f"Clinics:      {', '.join(clinic_names)}\n\n"
     body += day_lines
     if assigned_by:
         body += f"\nAssigned by: {assigned_by}\n"
