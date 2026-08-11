@@ -142,7 +142,7 @@
     {% if request.user.is_authenticated and request.user.profile.is_admin %}
     <li><a href="/" {% if request.resolver_match.url_name == 'dashboard' %}class="active"{% endif %}>Dashboard</a></li>
     {% endif %}
-    {% if request.user.is_authenticated and not request.user.profile.is_nursing  %}
+    {% if request.user.is_authenticated %}
     <li><a href="/time-off/" {% if 'time_off' in request.resolver_match.url_name and request.resolver_match.url_name != 'approved_time_off_coverage' and request.resolver_match.url_name != 'assign_locum_to_time_off' %}class="active"{% endif %}>Time Off</a></li>
     <li><a href="/on-call/" {% if 'on_call' in request.resolver_match.url_name %}class="active"{% endif %}>On Call</a></li>
     {% endif %}
@@ -151,15 +151,17 @@
     
     {% endif %}
 
-    {% if request.user.is_authenticated and request.user.profile.is_admin %}
-     <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
+    {% if request.user.is_authenticated and request.user.profile.can_approve_time_off %}
     <li><a href="/time-off/approved-coverage/" {% if request.resolver_match.url_name == 'approved_time_off_coverage' or request.resolver_match.url_name == 'assign_locum_to_time_off' %}class="active"{% endif %}>Coverage</a></li>
-    <li><a href="/clinics/" {% if 'clinic' in request.resolver_match.url_name %}class="active"{% endif %}>Clinics</a></li>
+    <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
+    {% endif %}
+    {% if request.user.is_authenticated and request.user.profile.is_admin %}
+    <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
+    <li><a href="/clinics/" ...>Clinics</a></li>
     
     <li><a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a></li>
     <li><a href="/locum-reports/" {% if request.resolver_match.url_name == 'locum_reports' %}class="active"{% endif %}>Locum Reports</a></li>
     <li><a href="/users/" {% if 'user' in request.resolver_match.url_name %}class="active"{% endif %}>Users</a></li>
-    <li><a href="/availability/" {% if 'availability' in request.resolver_match.url_name %}class="active"{% endif %}>Availability</a></li>
     {% endif %}
   </ul>
    
@@ -174,7 +176,7 @@
         <div>
           <div style="font-size:12.5px;font-weight:500;color:var(--text);line-height:1.2;">{{ request.user.get_full_name|default:request.user.username }}</div>
           <div style="font-size:10.5px;color:var(--text-3);line-height:1.2;">
-            {% if request.user.profile.is_admin %}Administrator{% else %}Physician{% endif %}
+            {% if request.user.profile.is_admin %}Administrator{% elif request.user.profile.is_physician_admin %}Physician Administrator{% elif request.user.profile.is_nursing %}Clinical{% else %}Physician{% endif %}
           </div>
         </div>
       </div>

@@ -110,7 +110,7 @@
       </div>
       <div style="flex:1; min-width:0;">
         <div style="font-weight:500; color:var(--text);">
-          <a href="/physicians/{{ item.request.physician.pk }}/" style="color:var(--text); text-decoration:none;">{{ item.request.physician }}</a>
+          {% if request.user.profile.is_admin %}<a href="/physicians/{{ item.request.physician.pk }}/" style="color:var(--text); text-decoration:none;">{{ item.request.physician }}</a>{% else %}{{ item.request.physician }}{% endif %}
         </div>
         <div style="font-size:12.5px; color:var(--text-3); margin-top:2px;">
           {{ item.request.start_date|date:"M j" }} – {{ item.request.end_date|date:"M j, Y" }}

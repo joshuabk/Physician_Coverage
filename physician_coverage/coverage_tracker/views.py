@@ -11,6 +11,8 @@ import json
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.mail import EmailMessage
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
@@ -390,6 +392,7 @@ def time_off_list(request):
     profile = getattr(request.user, 'profile', None)
     is_admin = bool(profile and profile.is_admin)
     is_physician_admin = bool(profile and profile.is_physician_admin)
+    is_nursing = bool(profile and profile.is_nursing)
     can_approve = bool(profile and profile.can_approve_time_off)
     status = request.GET.get('status', '')
     physician_id = request.GET.get('physician', '')
@@ -405,6 +408,11 @@ def time_off_list(request):
             qs = qs.filter(status=status)
         if physician_id:
             qs = qs.filter(physician_id=physician_id)
+    elif is_nursing:
+        # Clinical logins see APPROVED time off only, for both NROC and PSA
+        # physicians (read-only — the nursing gate blocks add/edit/cancel URLs).
+        qs = qs.filter(status='approved',
+                       physician__physician_type__in=['regular', 'psa'])
     else:
         qs = qs.filter(status__in=['pending', 'approved'])
         allowed_types = SCOPE_TO_TYPE.get(viewer_scope, [])
@@ -455,6 +463,7 @@ def time_off_list(request):
         'physician_filter': physician_id,
         'is_admin': is_admin,
         'is_physician_admin': is_physician_admin,
+        'is_nursing': is_nursing,
         'can_approve': can_approve,
     })
 
@@ -525,6 +534,56 @@ def _oncall_conflicts_for_request(physician, start_date, end_date):
     return warnings
 
 
+def _notify_time_off_submitted(req, submitted_by=None):
+    """Email the notification list when a new time-off request is submitted.
+
+    Controlled by two settings (physician_coverage/settings.py):
+      - SEND_NOTIFICATION_EMAILS: master switch. False in development, so
+        nothing is actually sent (the message prints to the console instead).
+        Set to True on the production server.
+      - TIME_OFF_NOTIFICATION_RECIPIENTS: list of addresses to notify.
+
+    Never raises — an email problem should never block the request itself.
+    """
+    recipients = getattr(settings, 'TIME_OFF_NOTIFICATION_RECIPIENTS', [])
+    if not recipients:
+        return
+
+    group = 'NROC' if req.physician.is_regular else ('PSA' if req.physician.is_psa else 'Locum')
+    body = (
+        f"A new time off request has been submitted.\n\n"
+        f"Physician:  Dr. {req.physician.first_name} {req.physician.last_name} ({group})\n"
+        f"Type:       {req.get_request_type_display()}\n"
+        f"Dates:      {req.start_date:%b %d, %Y} – {req.end_date:%b %d, %Y}\n"
+        f"Work days:  {req.duration_days}\n"
+        f"Status:     Pending approval\n"
+    )
+    if req.notes:
+        body += f"Notes:      {req.notes}\n"
+    if submitted_by:
+        body += f"\nSubmitted by: {submitted_by}\n"
+
+    try:
+        email = EmailMessage(
+            f"New Time Off Request — Dr. {req.physician.last_name} "
+            f"({req.start_date:%b %d} – {req.end_date:%b %d})",
+            body,
+            settings.EMAIL_HOST_USER,
+            recipients)
+
+        if getattr(settings, 'SEND_NOTIFICATION_EMAILS', False):
+            email.send()
+            print('mail sent')
+        else:
+            # Dev mode: send through the console backend so you can preview
+            # the message in the runserver window without emailing anyone.
+            email.send()
+            print('mail suppressed (SEND_NOTIFICATION_EMAILS is False) — printed above instead')
+    except Exception as e:
+        # Never let an email failure break the submission
+        print(f'time-off notification email failed: {e}')
+
+
 @login_required_custom
 def add_time_off(request):
     profile = getattr(request.user, 'profile', None)
@@ -567,6 +626,10 @@ def add_time_off(request):
             
             req.status = 'pending'
             req.save()
+            _notify_time_off_submitted(
+                req,
+                submitted_by=request.user.get_full_name() or request.user.username,
+            )
             messages.success(request, 'Time off request submitted.')
             return redirect('time_off_list')
     else:
@@ -1406,7 +1469,7 @@ def locum_costs(request):
     return render(request, 'coverage_tracker/locum_costs.html', context)
 
 
-@admin_required
+@can_approve_required
 def availability_view(request):
     selected_date = request.GET.get('date', str(date.today()))
     try:
@@ -1480,10 +1543,11 @@ def availability_view(request):
         'view_date': view_date,
         'today': date.today(),
         'holiday_set': holidays,
+        'is_admin': bool(getattr(getattr(request.user, 'profile', None), 'is_admin', False)),
     })
 
 
-@admin_required
+@can_approve_required
 def update_availability_note(request):
     """AJAX endpoint: save a free-text availability note for a physician."""
     if request.method != 'POST':
@@ -1508,7 +1572,7 @@ def update_availability_note(request):
     return JsonResponse({'ok': True, 'note': note})
 
 
-@admin_required
+@can_approve_required
 def update_availability(request):
     """AJAX endpoint: set a physician's availability for a specific date."""
     if request.method != 'POST':
@@ -1554,7 +1618,7 @@ def update_availability(request):
     })
 
 
-@admin_required
+@can_approve_required
 def approved_time_off_coverage(request):
     """
     Shows all approved time-off requests with per-day locum coverage.
@@ -1641,7 +1705,7 @@ def _build_day_locum_data(all_locums, day, current_covered_physician=None):
     return result
 
 
-@admin_required
+@can_approve_required
 def assign_locum_to_time_off(request, pk):
     """
     Per-day locum assignment for a time-off request.
@@ -1823,7 +1887,7 @@ def assign_locum_to_time_off(request, pk):
     })
 
 
-@admin_required
+@can_approve_required
 def edit_coverage_for_time_off(request, pk):
     """
     Edit existing per-day coverage for an approved time-off request.
@@ -1833,7 +1897,7 @@ def edit_coverage_for_time_off(request, pk):
     return redirect('assign_locum_to_time_off', pk=pk)
 
 
-@admin_required
+@can_approve_required
 def delete_time_off_coverage_day(request, assignment_pk):
     """Delete a single day's coverage assignment, redirect back to coverage page."""
     if request.method != 'POST':
@@ -1848,7 +1912,7 @@ def delete_time_off_coverage_day(request, assignment_pk):
     return redirect('approved_time_off_coverage')
 
 
-@admin_required
+@can_approve_required
 def mark_availability(request):
     if request.method == 'POST':
         form = PhysicianAvailabilityForm(request.POST)

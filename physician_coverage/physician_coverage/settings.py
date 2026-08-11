@@ -75,3 +75,36 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# ─── Email notifications ─────────────────────────────────────────────────────
+# Master switch. Leave False in development — no real emails will go out
+# (the message is printed to the console instead so you can preview it).
+# On the PRODUCTION server: set this to True and fill in the SMTP settings below.
+SEND_NOTIFICATION_EMAILS = False
+
+# Who gets notified when a new time-off request is submitted.
+# Add the recipients here, e.g. ['scheduler@northside.org', 'office@northside.org']
+TIME_OFF_NOTIFICATION_RECIPIENTS = [
+    # 'someone@example.com',
+]
+
+# SMTP settings — only used when SEND_NOTIFICATION_EMAILS is True.
+# With the switch off, Django uses the console backend (prints instead of sending).
+if SEND_NOTIFICATION_EMAILS:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+EMAIL_USE_SSL = True
+EMAIL_HOST='smtp.gmail.com'
+EMAIL_PORT=465
+EMAIL_HOST_USER = 'northsideemr@gmail.com'
+
+EMAIL_HOST_PASSWORD = 'wlkblvzmafvxftkq'
+#EMAIL_HOST_PASSWORD = 'NorthsideEMR2001!'
+
+DEFAULT_EMAIL_FROM = 'northsideemr@gmail.com'
+      # app password / SMTP password
+
+
+

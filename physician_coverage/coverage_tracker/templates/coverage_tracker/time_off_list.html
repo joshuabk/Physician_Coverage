@@ -2,12 +2,14 @@
 {% block title %}Time Off Requests{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Time Off Requests</h1>
+  <h1>{% if is_nursing %}Approved Time Off{% else %}Time Off Requests{% endif %}</h1>
   <div style="display:flex; gap:8px;">
     {% if is_admin %}
     <a href="/time-off/approved-coverage/" class="btn btn-ghost">Coverage View</a>
     {% endif %}
+    {% if not is_nursing %}
     <a href="/time-off/add/" class="btn btn-primary">+ New Request</a>
+    {% endif %}
   </div>
 </div>
 
@@ -62,6 +64,13 @@
             {% endif %}
             {% else %}
             <span style="font-weight:500;">{{ req.physician }}</span>
+            {% if is_nursing %}
+              {% if req.physician.is_regular %}
+                <span class="badge badge-regular" style="margin-left:6px;">NROC</span>
+              {% elif req.physician.is_psa %}
+                <span class="badge badge-psa" style="margin-left:6px;">PSA</span>
+              {% endif %}
+            {% endif %}
           {% endif %}
         </td>
           
@@ -120,7 +129,7 @@
                     <button type="submit" class="btn btn-danger btn-sm">Deny</button>
                   </form>
                 {% endif %}
-                {% if req.status == 'approved' and is_admin%}
+                {% if req.status == 'approved' %}
                   <a href="/time-off/{{ req.pk }}/assign-locum/" class="btn btn-ghost btn-sm" title="Edit coverage">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </a>
@@ -154,7 +163,7 @@
         {% empty %}
         <tr>
           <td colspan="7" style="text-align:center; padding:2rem;" class="empty-state">
-            {% if is_admin %}No requests found.{% else %}You have no time off requests yet. <a href="/time-off/add/" style="color:var(--teal);">Submit one</a>.{% endif %}
+            {% if is_admin %}No requests found.{% elif is_nursing %}No approved time off on record.{% else %}You have no time off requests yet. <a href="/time-off/add/" style="color:var(--teal);">Submit one</a>.{% endif %}
           </td>
         </tr>
         {% endfor %}

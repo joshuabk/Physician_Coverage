@@ -4,7 +4,7 @@ from django.contrib import messages
 
 
 
-NURSING_ALLOWED_URLS = {'clinic_list','calendar'}
+NURSING_ALLOWED_URLS = {'clinic_list', 'calendar', 'on_call_schedule', 'time_off_list'}
 
 
 
@@ -30,7 +30,7 @@ def _nursing_gate(request):
     url_name = getattr(getattr(request, 'resolver_match', None), 'url_name', None)
     if url_name in NURSING_ALLOWED_URLS:
         return None
-    messages.error(request, 'Clinical accounts can only access the Clinics and Calendar pages.')
+    messages.error(request, 'Clinical accounts can only access the Clinics, Calendar, On-Call, and Time Off pages.')
     return redirect('clinic_list')
 
 
