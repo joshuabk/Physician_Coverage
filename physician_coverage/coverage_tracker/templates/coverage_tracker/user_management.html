@@ -79,11 +79,11 @@
             <div class="flex gap-2">
               <a href="/users/{{ user.pk }}/edit/" class="btn btn-ghost btn-sm">Edit</a>
               {% if user != request.user %}
-              <a href="/users/{{ user.pk }}/delete/"
-                 class="btn btn-danger btn-sm"
-                 onclick="return confirm('Delete account for {{ user.get_full_name|default:user.username }}? This cannot be undone.')">
-                Delete
-              </a>
+              <form method="post" action="/users/{{ user.pk }}/delete/" style="display:inline;"
+                    onsubmit="return confirm('Delete account for {{ user.get_full_name|default:user.username }}? This cannot be undone.')">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              </form>
               {% endif %}
             </div>
           </td>
@@ -140,7 +140,7 @@
       </ul>
     </div>
     <div style="background:rgba(46,194,126,0.07);border:1px solid rgba(46,194,126,0.2);border-radius:10px;padding:1rem;">
-      <div style="font-weight:600;color:var(--green);margin-bottom:6px;">🩺 Nursing</div>
+      <div style="font-weight:600;color:var(--green);margin-bottom:6px;">🩺 Clinical</div>
       <ul style="font-size:13px;color:var(--text-2);list-style:none;display:flex;flex-direction:column;gap:4px;">
         <li>✓ Can only see the Clinics page (read-only)</li>
         <li>✗ Cannot submit or view time off</li>

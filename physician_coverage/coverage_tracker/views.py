@@ -2690,7 +2690,7 @@ def add_user(request):
         
         username     = dj_forms.CharField(max_length=150, widget=dj_forms.TextInput(attrs={'class': 'form-control'}))
         password     = dj_forms.CharField(widget=dj_forms.PasswordInput(attrs={'class': 'form-control'}), min_length=6)
-        role         = dj_forms.ChoiceField(choices=[('physician', 'Physician'),('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Nursing')],
+        role         = dj_forms.ChoiceField(choices=[('physician', 'Physician'),('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Clinical')],
                                              widget=dj_forms.Select(attrs={'class': 'form-control'}))
         
         scope        = dj_forms.ChoiceField(
@@ -2750,7 +2750,7 @@ def edit_user(request, pk):
     class EditUserForm(dj_forms.Form):
         
        
-        role        = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Nursing')],
+        role        = dj_forms.ChoiceField(choices=[('physician', 'Physician'), ('physician_admin', 'Physician Administrator'), ('admin', 'Administrator'), ('nursing', 'Clinical')],
                                             widget=dj_forms.Select(attrs={'class': 'form-control'}))
         scope   = dj_forms.ChoiceField(
             label='Group',
