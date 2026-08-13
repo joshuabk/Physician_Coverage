@@ -154,16 +154,28 @@ class Physician(models.Model):
 
         Pools reset every November 1: a request belongs to the fiscal year
         containing its START date (FY N = Nov 1 of N-1 through Oct 31 of N).
+
+        Day-level approval aware: when a request has per-day rows, each day
+        is counted against the pool matching ITS OWN status (so a partially
+        approved request charges only its approved days). Requests without
+        day rows fall back to the legacy request-level status.
         """
         if fiscal_year is None:
             fiscal_year = current_fiscal_year()
         fy_start, fy_end = fiscal_year_range(fiscal_year)
         total = 0
-        for req in TimeOffRequest.objects.filter(physician=self, status=status,
-                                                 request_type__in=request_types,
-                                                 start_date__gte=fy_start,
-                                                 start_date__lte=fy_end):
-            total += req.duration_days
+        reqs = TimeOffRequest.objects.filter(
+            physician=self,
+            request_type__in=request_types,
+            start_date__gte=fy_start,
+            start_date__lte=fy_end,
+        ).exclude(status='cancelled').prefetch_related('days')
+        for req in reqs:
+            day_rows = list(req.days.all())
+            if day_rows:
+                total += sum(1 for d in day_rows if d.status == status)
+            elif req.status == status:
+                total += req.duration_days
         return total
 
     def days_taken(self, year=None):
@@ -424,6 +436,122 @@ class TimeOffRequest(models.Model):
     @property
     def duration_days(self):
         return len(self.workdays())
+
+    # ── Per-day approval ─────────────────────────────────────────────────
+
+    def ensure_day_rows(self):
+        """Create/sync the per-day approval rows to match this request's
+        current business days.
+
+        Safe to call repeatedly. New days inherit the request's status
+        ('approved'/'denied' requests spawn matching day rows; anything else
+        spawns 'pending'). Day rows whose date falls outside the (possibly
+        edited) date range are deleted.
+        """
+        valid = self.workdays()
+        valid_set = set(valid)
+        existing = {d.date: d for d in self.days.all()}
+        for dte, row in existing.items():
+            if dte not in valid_set:
+                row.delete()
+        if self.status in ('approved', 'denied'):
+            default_status = self.status
+        else:
+            default_status = 'pending'
+        for dte in valid:
+            if dte not in existing:
+                TimeOffDay.objects.create(request=self, date=dte, status=default_status)
+        return self.days.all()
+
+    def approved_workdays(self):
+        """Dates of this request that are individually approved.
+
+        Requests without day rows (legacy) fall back to the request-level
+        status: every workday if approved, none otherwise.
+        """
+        rows = list(self.days.all())
+        if rows:
+            return sorted(d.date for d in rows if d.status == 'approved')
+        return self.workdays() if self.status == 'approved' else []
+
+    def pending_workdays(self):
+        rows = list(self.days.all())
+        if rows:
+            return sorted(d.date for d in rows if d.status == 'pending')
+        return self.workdays() if self.status == 'pending' else []
+
+    @property
+    def approved_days_count(self):
+        return len(self.approved_workdays())
+
+    @property
+    def has_pending_days(self):
+        return bool(self.pending_workdays())
+
+    def sync_status_from_days(self, save=True):
+        """Roll the day statuses up into the request-level status.
+
+        Any approved day → 'approved' (so coverage pages pick the request
+        up); otherwise any pending day → 'pending'; otherwise (all days
+        denied) → 'denied'. Cancelled requests are never touched.
+        """
+        if self.status == 'cancelled':
+            return self.status
+        statuses = set(self.days.values_list('status', flat=True))
+        if not statuses:
+            return self.status
+        if 'approved' in statuses:
+            new_status = 'approved'
+        elif 'pending' in statuses:
+            new_status = 'pending'
+        else:
+            new_status = 'denied'
+        if new_status != self.status:
+            self.status = new_status
+            if save:
+                self.save()
+        return self.status
+
+
+class TimeOffDay(models.Model):
+    """One business day of a TimeOffRequest, approved or denied individually.
+
+    Lets an approver green-light part of a vacation request (e.g. approve
+    Mon–Wed but deny Thu–Fri) and drive per-day locum assignment + the
+    'approved & covered' notification email.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+    ]
+
+    request = models.ForeignKey(
+        TimeOffRequest, on_delete=models.CASCADE, related_name='days')
+    date = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    decided_by = models.CharField(max_length=150, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['request', 'date'],
+                name='one_day_row_per_request_date',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.request.physician} — {self.date} ({self.status})"
+
+    @property
+    def coverage_assignment(self):
+        """The CoverageAssignment covering this physician on this date, if any."""
+        return CoverageAssignment.objects.filter(
+            covered_physician=self.request.physician, date=self.date
+        ).select_related('covering_physician', 'clinic').first()
+
 
 class CoverageAssignment(models.Model):
     clinic = models.ForeignKey(Clinic, on_delete=models.CASCADE, related_name='coverage_assignments')

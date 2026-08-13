@@ -26,6 +26,10 @@ urlpatterns = [
     path('time-off/<int:pk>/deny/', views.deny_time_off, name='deny_time_off'),
     path('time-off/<int:pk>/cancel/', views.cancel_time_off, name='cancel_time_off'),
     path('time-off/<int:pk>/assign-locum/', views.assign_locum_to_time_off, name='assign_locum_to_time_off'),
+    # Per-day approval + popup locum assignment
+    path('time-off/day/<int:pk>/approve/', views.approve_time_off_day, name='approve_time_off_day'),
+    path('time-off/day/<int:pk>/deny/', views.deny_time_off_day, name='deny_time_off_day'),
+    path('time-off/<int:pk>/assign-locums/', views.assign_locums_group, name='assign_locums_group'),
     path('coverage-day/<int:assignment_pk>/delete/', views.delete_time_off_coverage_day, name='delete_time_off_coverage_day'),
 
     # Calendar

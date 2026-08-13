@@ -34,7 +34,8 @@ from django.core.exceptions import ValidationError
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability,
     CoverageRequest, UserProfile, OnCallSchedule, ClinicSchedule, DayReassignment,
-    get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, fiscal_year_range, 
+    TimeOffDay,
+    get_holidays, get_extra_workdays, is_workday, current_fiscal_year, fiscal_year_range, fiscal_year_range,
     current_locum_fiscal_year, locum_fiscal_year_range,
 )
 
@@ -49,6 +50,19 @@ from .decorators import login_required_custom, admin_required, can_approve_requi
 
 # Maps a UserProfile.scope value to the Physician.physician_type values it covers.
 SCOPE_TO_TYPE = {'nroc': ['regular'], 'psa': ['psa'], 'all': ['regular', 'psa']}
+
+
+def _is_approved_on(req, day):
+    """True if `req` covers `day` as an individually-approved day.
+
+    Per-day approval aware, with a fallback for legacy requests that predate
+    the TimeOffDay rows (there, the request-level status governs the whole
+    date range, as before).
+    """
+    rows = list(req.days.all())
+    if rows:
+        return any(d.date == day and d.status == 'approved' for d in rows)
+    return req.status == 'approved' and req.start_date <= day <= req.end_date
 
 
 def _int_param(request, name, default):
@@ -102,16 +116,30 @@ def dashboard(request):
         date=today, no_coverage_needed=False
     ).select_related('clinic', 'covering_physician', 'covered_physician')
 
-    out_today = TimeOffRequest.objects.filter(
-        status='approved', start_date__lte=today, end_date__gte=today
-    ).select_related('physician')
+    # Day-level aware: only count physicians whose specific day is approved.
+    # `_approved_on` falls back to the request-level status for legacy
+    # requests that have no per-day rows yet.
+    out_today = [
+        r for r in TimeOffRequest.objects.filter(
+            status='approved', start_date__lte=today, end_date__gte=today
+        ).select_related('physician').prefetch_related('days')
+        if _is_approved_on(r, today)
+    ]
 
-    upcoming = TimeOffRequest.objects.filter(
-        status='approved', start_date__gte=today,
-        start_date__lte=today + timedelta(days=30)
-    ).select_related('physician').order_by('start_date')[:10]
+    upcoming = [
+        r for r in TimeOffRequest.objects.filter(
+            status='approved', start_date__gte=today,
+            start_date__lte=today + timedelta(days=30)
+        ).select_related('physician').prefetch_related('days').order_by('start_date')
+        if r.approved_workdays()
+    ][:10]
 
-    pending = TimeOffRequest.objects.filter(status='pending').select_related('physician').order_by('start_date')
+    # A partially-approved request rolls up to 'approved' but may still have
+    # pending days — keep it on the pending list until every day is decided.
+    pending = TimeOffRequest.objects.filter(
+        Q(status='pending') | Q(days__status='pending')
+    ).exclude(status__in=['cancelled', 'denied']).select_related(
+        'physician').distinct().order_by('start_date')
 
     # Vacation summaries for regular physicians only
     physician_summaries = []
@@ -396,7 +424,8 @@ def time_off_list(request):
     can_approve = bool(profile and profile.can_approve_time_off)
     status = request.GET.get('status', '')
     physician_id = request.GET.get('physician', '')
-    qs = TimeOffRequest.objects.select_related('physician').order_by('-start_date')
+    qs = TimeOffRequest.objects.select_related('physician').prefetch_related(
+        'days').order_by('-start_date')
 
     # Full admins see everything (with optional filters); physician admins and
     # physicians see all pending + approved requests across the team.
@@ -404,7 +433,11 @@ def time_off_list(request):
     # 'nroc' here maps to the DB value 'regular' on Physician.physician_type.
 
     if is_admin:
-        if status:
+        if status == 'pending':
+            # Include partially-approved requests that still have pending days
+            qs = qs.filter(days__status='pending').exclude(
+                status__in=['cancelled', 'denied']).distinct()
+        elif status:
             qs = qs.filter(status=status)
         if physician_id:
             qs = qs.filter(physician_id=physician_id)
@@ -426,20 +459,23 @@ def time_off_list(request):
     # Resolve the logged-in user's physician record (used to mark their own requests)
     viewer_physician = profile.physician if profile else None
 
-    # Attach coverage info to each approved request
+    # Attach coverage + per-day info to each request
     enriched_requests = []
     for req in qs:
         coverage = None
         coverage_status = None
+        assignments_by_date = {}
         if req.status == 'approved':
             assignments = CoverageAssignment.objects.filter(
                 covered_physician=req.physician,
                 date__gte=req.start_date,
                 date__lte=req.end_date,
             ).select_related('covering_physician', 'clinic').order_by('date')
-            covered_dates = set(a.date for a in assignments)
-            all_dates_count = req.duration_days
-            if assignments.exists():
+            assignments_by_date = {a.date: a for a in assignments}
+            covered_dates = set(assignments_by_date)
+            # Coverage completeness is judged against the APPROVED days only
+            all_dates_count = len(req.approved_workdays()) or req.duration_days
+            if assignments:
                 if len(covered_dates) >= all_dates_count:
                     coverage_status = 'full'
                 else:
@@ -449,12 +485,81 @@ def time_off_list(request):
             # Get unique locums
             locum_names = list({a.covering_physician for a in assignments if a.covering_physician_id})
             coverage = locum_names
+
+        # Per-day rows (approve/deny each day individually)
+        day_details = []
+        if req.status in ('pending', 'approved'):
+            day_rows = list(req.days.all())
+            if not day_rows:
+                # Legacy request created before per-day approval — build rows now
+                req.ensure_day_rows()
+                day_rows = list(req.days.all())
+            for day in day_rows:
+                a = assignments_by_date.get(day.date)
+                day_details.append({
+                    'day': day,
+                    'assignment': a,
+                    'locum': a.covering_physician if (a and a.covering_physician_id) else None,
+                    'no_coverage': bool(a and a.no_coverage_needed),
+                })
         enriched_requests.append({
             'req': req,
             'coverage': coverage,
             'coverage_status': coverage_status,
             'is_own': viewer_physician is not None and req.physician_id == viewer_physician.pk,
+            'day_details': day_details,
+            'has_pending_days': any(d['day'].status == 'pending' for d in day_details),
         })
+
+    # Locum-assignment popup: opened right after a day is approved
+    # (?assign_req=<TimeOffRequest pk>), or from a day row's "+ Locum" link.
+    # The popup covers the WHOLE request: one row per approved day, saved and
+    # emailed as a group — even when only some of the days are approved so far.
+    assign_req_ctx = None
+    assign_req_id = request.GET.get('assign_req')
+    if assign_req_id and can_approve:
+        try:
+            popup_req = TimeOffRequest.objects.select_related('physician').get(
+                pk=int(assign_req_id))
+        except (TimeOffRequest.DoesNotExist, ValueError, TypeError):
+            popup_req = None
+        if popup_req is not None and popup_req.status != 'cancelled':
+            popup_req.ensure_day_rows()
+            approved_days = list(popup_req.days.filter(
+                status='approved').order_by('date'))
+            if approved_days:
+                all_locums = Physician.objects.filter(
+                    is_active=True, physician_type='locum')
+                existing_map = {
+                    a.date: a
+                    for a in CoverageAssignment.objects.filter(
+                        covered_physician=popup_req.physician,
+                        date__in=[d.date for d in approved_days],
+                    ).select_related('covering_physician', 'clinic')
+                }
+                physician_clinics = list(
+                    popup_req.physician.assigned_clinics.filter(is_active=True))
+                fallback_clinic = physician_clinics[0] if physician_clinics else None
+                day_rows = []
+                for d in approved_days:
+                    existing = existing_map.get(d.date)
+                    day_rows.append({
+                        'day': d,
+                        'existing': existing,
+                        'default_clinic': existing.clinic if existing else fallback_clinic,
+                        'locum_options': _build_day_locum_data(
+                            all_locums, d.date,
+                            current_covered_physician=popup_req.physician),
+                    })
+                assign_req_ctx = {
+                    'req': popup_req,
+                    'day_rows': day_rows,
+                    'clinics': Clinic.objects.filter(is_active=True),
+                    'denied_days': [d.date for d in popup_req.days.all()
+                                    if d.status == 'denied'],
+                    'pending_days': [d.date for d in popup_req.days.all()
+                                     if d.status == 'pending'],
+                }
 
     return render(request, 'coverage_tracker/time_off_list.html', {
         'enriched_requests': enriched_requests,
@@ -465,6 +570,7 @@ def time_off_list(request):
         'is_physician_admin': is_physician_admin,
         'is_nursing': is_nursing,
         'can_approve': can_approve,
+        'assign_req_ctx': assign_req_ctx,
     })
 
 def _on_call_weekends_for_physicians(physician_qs):
@@ -733,6 +839,79 @@ def _notify_locum_assigned(assignments, assigned_by=None, covered_physician=None
         body)
 
 
+def _notify_group_coverage(req, assigned_by=None):
+    """Email the main notification list after the group locum-assignment popup
+    is submitted for a time-off request.
+
+    ONE email for the whole submission, covering every APPROVED day of the
+    request — even when only some of the days have been approved so far.
+    Each approved day is listed with its covering locum (clinic, hours,
+    agency) or flagged as not yet covered; denied days and days still
+    awaiting a decision are called out separately so the group always has
+    the full picture of the request.
+    """
+    approved_days = list(req.days.filter(status='approved').order_by('date'))
+    if not approved_days:
+        return
+    coverage = {
+        a.date: a
+        for a in CoverageAssignment.objects.filter(
+            covered_physician=req.physician,
+            date__in=[d.date for d in approved_days],
+        ).select_related('covering_physician', 'clinic')
+    }
+
+    body = (
+        "Time off has been approved and locum coverage has been submitted.\n\n"
+        + _time_off_request_lines(req)
+        + f"\nApproved days & coverage ({len(approved_days)} of "
+        f"{req.duration_days} day{'s' if req.duration_days != 1 else ''}):\n"
+    )
+    covering_locums = []
+    for d in approved_days:
+        a = coverage.get(d.date)
+        line = f"  {d.date:%a, %b %d, %Y}:  "
+        if a and a.covering_physician_id:
+            locum = a.covering_physician
+            line += f"Dr. {locum.first_name} {locum.last_name} at {a.clinic.name}"
+            if a.hours is not None:
+                line += f" — {a.hours} hrs"
+            if locum.agency:
+                line += f" ({locum.agency})"
+            if locum.pk not in [l.pk for l in covering_locums]:
+                covering_locums.append(locum)
+        elif a and a.no_coverage_needed:
+            line += f"no coverage needed ({a.no_coverage_reason})"
+        else:
+            line += "no locum assigned yet"
+        body += line + "\n"
+
+    denied = [d.date for d in req.days.all() if d.status == 'denied']
+    still_pending = req.pending_workdays()
+    if denied:
+        body += ("\nDenied:            "
+                 + ', '.join(f"{d:%b %d}" for d in sorted(denied)) + "\n")
+    if still_pending:
+        body += ((("Awaiting decision: ") if denied else "\nAwaiting decision: ")
+                 + ', '.join(f"{d:%b %d}" for d in still_pending) + "\n")
+
+    if assigned_by:
+        body += f"\nSubmitted by: {assigned_by}\n"
+
+    if len(covering_locums) == 1:
+        who = f"Dr. {covering_locums[0].last_name} covering"
+    elif covering_locums:
+        who = f"{len(covering_locums)} locums covering"
+    else:
+        who = "no locum assigned yet"
+    n = len(approved_days)
+    _send_time_off_email(
+        f"Time Off Approved & Covered — Dr. {req.physician.last_name} "
+        f"({req.start_date:%b %d} – {req.end_date:%b %d}): "
+        f"{n} day{'s' if n != 1 else ''} approved, {who}",
+        body)
+
+
 def _notify_time_off_decision(req, decision, decided_by=None):
     """Email the notification list when a request is approved or denied.
 
@@ -795,6 +974,7 @@ def add_time_off(request):
             
             req.status = 'pending'
             req.save()
+            req.ensure_day_rows()
             _notify_time_off_submitted(
                 req,
                 submitted_by=request.user.get_full_name() or request.user.username,
@@ -878,6 +1058,16 @@ def edit_time_off(request, pk):
                     'oncall_warnings': oncall_warnings,
                 })
             updated = form.save()
+            # Keep per-day rows in sync with the (possibly changed) date range,
+            # and cascade a request-level status change down to every day.
+            updated.ensure_day_rows()
+            if updated.status != old_status and updated.status in ('pending', 'approved', 'denied'):
+                updated.days.update(
+                    status=updated.status,
+                    decided_by=(request.user.get_full_name() or request.user.username)
+                    if updated.status in ('approved', 'denied') else '',
+                    decided_at=timezone.now() if updated.status in ('approved', 'denied') else None,
+                )
             # If an edit flipped the status to approved or denied, notify the email list too
             if updated.status in ('approved', 'denied') and old_status != updated.status:
                 _notify_time_off_decision(
@@ -955,6 +1145,15 @@ def approve_time_off(request, pk):
     already_approved = req.status == 'approved'
     req.status = 'approved'
     req.save()
+    # Bulk approve = every remaining pending day is approved
+    req.ensure_day_rows()
+    req.days.filter(status='pending').update(
+        status='approved',
+        decided_by=request.user.get_full_name() or request.user.username,
+        decided_at=timezone.now(),
+    )
+    # Guard the edge case where every day was already denied
+    req.sync_status_from_days()
     if not already_approved:
         _notify_time_off_decision(
             req, 'approved',
@@ -976,12 +1175,190 @@ def deny_time_off(request, pk):
     already_denied = req.status == 'denied'
     req.status = 'denied'
     req.save()
+    # Bulk deny = every day is denied
+    req.ensure_day_rows()
+    req.days.exclude(status='denied').update(
+        status='denied',
+        decided_by=request.user.get_full_name() or request.user.username,
+        decided_at=timezone.now(),
+    )
     if not already_denied:
         _notify_time_off_decision(
             req, 'denied',
             decided_by=request.user.get_full_name() or request.user.username,
         )
     messages.warning(request, f'Denied time off for {req.physician}.')
+    return redirect('time_off_list')
+
+
+@can_approve_required
+def approve_time_off_day(request, pk):
+    """Approve a single day of a time-off request.
+
+    On success, redirects back to the list with ?assign_req=<request pk> so
+    the group locum-assignment popup opens, listing every approved day of
+    the request so far.
+    """
+    if request.method != 'POST':
+        return redirect('time_off_list')
+    day = get_object_or_404(
+        TimeOffDay.objects.select_related('request__physician'), pk=pk)
+    req = day.request
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
+        messages.error(request, 'You can only approve requests for physicians in your group.')
+        return redirect('time_off_list')
+    if req.status == 'cancelled':
+        messages.error(request, 'That request has been cancelled.')
+        return redirect('time_off_list')
+
+    day.status = 'approved'
+    day.decided_by = request.user.get_full_name() or request.user.username
+    day.decided_at = timezone.now()
+    day.save()
+    req.sync_status_from_days()
+
+    messages.success(
+        request,
+        f'Approved {day.date:%b %d} for {req.physician}. Assign locum coverage below.'
+    )
+    from django.urls import reverse
+    return redirect(f"{reverse('time_off_list')}?assign_req={req.pk}")
+
+
+@can_approve_required
+def deny_time_off_day(request, pk):
+    """Deny a single day of a time-off request (removes that day's coverage, if any)."""
+    if request.method != 'POST':
+        return redirect('time_off_list')
+    day = get_object_or_404(
+        TimeOffDay.objects.select_related('request__physician'), pk=pk)
+    req = day.request
+    profile = getattr(request.user, 'profile', None)
+    if not (profile and (profile.is_admin or req.physician.physician_type in _scope_types(profile))):
+        messages.error(request, 'You can only deny requests for physicians in your group.')
+        return redirect('time_off_list')
+    if req.status == 'cancelled':
+        messages.error(request, 'That request has been cancelled.')
+        return redirect('time_off_list')
+
+    day.status = 'denied'
+    day.decided_by = request.user.get_full_name() or request.user.username
+    day.decided_at = timezone.now()
+    day.save()
+    # A denied day can't keep locum coverage
+    removed, _ = CoverageAssignment.objects.filter(
+        covered_physician=req.physician, date=day.date).delete()
+    req.sync_status_from_days()
+
+    msg = f'Denied {day.date:%b %d} for {req.physician}.'
+    if removed:
+        msg += ' Locum coverage for that day was removed.'
+    messages.warning(request, msg)
+    return redirect('time_off_list')
+
+
+@can_approve_required
+def assign_locums_group(request, pk):
+    """Save the locums picked in the group popup for a time-off request —
+    one submit covers every approved day — then send ONE email to the main
+    notification group with the coverage for all approved days (noting any
+    denied days and days still awaiting a decision).
+
+    Days that are not approved are ignored even if form fields are posted
+    for them. A day whose locum/clinic selects are both left blank is
+    skipped (assign later); picking only one of the two is an error for
+    that day but doesn't block the rest of the submission.
+    """
+    if request.method != 'POST':
+        return redirect('time_off_list')
+    req = get_object_or_404(
+        TimeOffRequest.objects.select_related('physician'), pk=pk)
+
+    if req.status == 'cancelled':
+        messages.error(request, 'That request has been cancelled.')
+        return redirect('time_off_list')
+
+    approved_days = list(req.days.filter(status='approved').order_by('date'))
+    if not approved_days:
+        messages.error(request, 'No approved days yet — approve at least one day first.')
+        return redirect('time_off_list')
+
+    existing_map = {
+        a.date: a
+        for a in CoverageAssignment.objects.filter(
+            covered_physician=req.physician,
+            date__in=[d.date for d in approved_days],
+        )
+    }
+    locums = {p.pk: p for p in Physician.objects.filter(
+        is_active=True, physician_type='locum')}
+    clinics = {c.pk: c for c in Clinic.objects.filter(is_active=True)}
+
+    saved = 0
+    errors = []
+    for d in approved_days:
+        key = d.date.strftime('%Y-%m-%d')
+        locum_id = request.POST.get(f'locum_{key}')
+        clinic_id = request.POST.get(f'clinic_{key}')
+        hours_raw = (request.POST.get(f'hours_{key}') or '').strip()
+
+        if not locum_id and not clinic_id:
+            continue  # left blank — assign later
+        if not locum_id or not clinic_id:
+            errors.append(f'{d.date:%b %d}: pick both a locum and a clinic.')
+            continue
+        try:
+            locum = locums.get(int(locum_id))
+            clinic = clinics.get(int(clinic_id))
+        except (ValueError, TypeError):
+            continue
+        if not locum or not clinic:
+            continue
+
+        try:
+            hours_value = Decimal(hours_raw) if hours_raw else Decimal('8.00')
+            if hours_value < 0:
+                hours_value = Decimal('8.00')
+        except (InvalidOperation, TypeError):
+            hours_value = Decimal('8.00')
+
+        existing = existing_map.get(d.date)
+        if existing:
+            existing.covering_physician = locum
+            existing.clinic = clinic
+            existing.hours = hours_value
+            existing.no_coverage_needed = False
+            existing.no_coverage_reason = ''
+            existing.save()
+        else:
+            existing_map[d.date] = CoverageAssignment.objects.create(
+                clinic=clinic,
+                covering_physician=locum,
+                covered_physician=req.physician,
+                date=d.date,
+                hours=hours_value,
+                notes=f'Assigned for time off: {req.start_date} – {req.end_date}',
+            )
+        saved += 1
+
+    for err in errors:
+        messages.error(request, err)
+
+    if saved:
+        # ONE email for the whole submission, covering all approved days
+        _notify_group_coverage(
+            req,
+            assigned_by=request.user.get_full_name() or request.user.username,
+        )
+        n_approved = len(approved_days)
+        messages.success(
+            request,
+            f'Coverage saved for {saved} day(s). The notification group has '
+            f'been emailed with all {n_approved} approved day(s) for {req.physician}.'
+        )
+    elif not errors:
+        messages.info(request, 'No locums selected — nothing saved, no email sent.')
     return redirect('time_off_list')
 
 
@@ -1079,7 +1456,8 @@ def clinic_list(request):
         r.physician_id: r.pk
         for r in TimeOffRequest.objects.filter(
             status='approved', start_date__lte=view_date, end_date__gte=view_date
-        )
+        ).prefetch_related('days')
+        if _is_approved_on(r, view_date)
     }
     
     out_ids = set(out_reqs)
@@ -1265,12 +1643,11 @@ def calendar_view(request):
             status='approved', start_date__lte=span_end, end_date__gte=span_start,
             physician__is_active=True,
             physician__physician_type__in=['regular', 'psa'],
-            ).select_related('physician'):
-        d = max(req.start_date, span_start)
-        stop = min(req.end_date, span_end)
-        while d <= stop:
-            off_by_date.setdefault(d, set()).add(req.physician)
-            d += timedelta(days=1)
+            ).select_related('physician').prefetch_related('days'):
+        # Per-day approval aware: only individually approved days show as "off"
+        for d in req.approved_workdays():
+            if span_start <= d <= span_end:
+                off_by_date.setdefault(d, set()).add(req.physician)
 
     # Locum coverage: date -> {covered_physician_id: covering locum}
     cover_by_date = {}
@@ -1697,14 +2074,13 @@ def availability_view(request):
         status='approved',
         start_date__lte=calendar_days[-1],
         end_date__gte=calendar_days[0]
-    )
+    ).prefetch_related('days')
 
     off_set = set()
     for req in time_off:
-        d = req.start_date
-        while d <= req.end_date:
+        # Per-day approval aware: only individually approved days count as off
+        for d in req.approved_workdays():
             off_set.add((req.physician_id, d))
-            d += timedelta(days=1)
 
     assigned_set = set()
     for a in CoverageAssignment.objects.filter(
@@ -1840,7 +2216,8 @@ def approved_time_off_coverage(request):
             ).select_related('covering_physician', 'clinic')
         }
 
-        all_dates = req.workdays()
+        # Only individually-approved days need coverage
+        all_dates = req.approved_workdays()
 
         day_coverage = []
         uncovered_dates = []
@@ -1911,8 +2288,9 @@ def assign_locum_to_time_off(request, pk):
     """
     req = get_object_or_404(TimeOffRequest, pk=pk, status='approved')
 
-    # Build full date list (business days, holiday- and cross-year-aware)
-    all_dates = req.workdays()
+    # Build the date list: approved days only (per-day approval aware;
+    # falls back to every business day for legacy requests without day rows)
+    all_dates = req.approved_workdays() or req.workdays()
 
     # Existing assignments keyed by date
     existing_assignments = {

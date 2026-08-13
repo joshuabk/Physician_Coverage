@@ -4,7 +4,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     Physician, Clinic, TimeOffRequest, CoverageAssignment,
     PhysicianAvailability, CoverageRequest, UserProfile, OnCallSchedule,
-    ClinicSchedule, DayReassignment,
+    ClinicSchedule, DayReassignment, TimeOffDay,
 )
 
 
@@ -81,12 +81,20 @@ class ClinicScheduleAdmin(admin.ModelAdmin):
 
 
 # ── TimeOffRequest ────────────────────────────────────────────────────────────
+class TimeOffDayInline(admin.TabularInline):
+    model = TimeOffDay
+    extra = 0
+    fields = ('date', 'status', 'decided_by', 'decided_at')
+    readonly_fields = ('decided_by', 'decided_at')
+
+
 @admin.register(TimeOffRequest)
 class TimeOffRequestAdmin(admin.ModelAdmin):
     list_display = ['physician', 'start_date', 'end_date', 'request_type', 'status', 'duration_days']
     list_filter = ['status', 'request_type', 'physician']
     date_hierarchy = 'start_date'
     ordering = ['-start_date']
+    inlines = [TimeOffDayInline]
 
     def duration_days(self, obj):
         return f"{obj.duration_days} day(s)"
