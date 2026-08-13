@@ -13,9 +13,10 @@
   </div>
 </div>
 
-{% if is_admin %}
-<!-- Filters: admin only -->
+<!-- Filters: physician filter for everyone (scoped to the login's group);
+     status filter stays admin-only -->
 <form method="get" style="display:flex; gap:10px; margin-bottom:1.25rem; flex-wrap:wrap;">
+  {% if is_admin %}
   <select name="status" class="form-control" style="width:auto;">
     <option value="">All Statuses</option>
     <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
@@ -23,6 +24,7 @@
     <option value="denied" {% if status_filter == 'denied' %}selected{% endif %}>Denied</option>
     <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
   </select>
+  {% endif %}
   <select name="physician" class="form-control" style="width:auto;">
     <option value="">All Physicians</option>
     {% for p in physicians %}
@@ -32,7 +34,6 @@
   <button type="submit" class="btn btn-ghost">Filter</button>
   <a href="/time-off/" class="btn btn-ghost">Clear</a>
 </form>
-{% endif %}
 
 <div class="card">
   <div class="table-wrap">

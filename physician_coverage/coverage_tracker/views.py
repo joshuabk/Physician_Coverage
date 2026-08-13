@@ -446,6 +446,8 @@ def time_off_list(request):
         # physicians (read-only — the nursing gate blocks add/edit/cancel URLs).
         qs = qs.filter(status='approved',
                        physician__physician_type__in=['regular', 'psa'])
+        if physician_id:
+            qs = qs.filter(physician_id=physician_id)
     else:
         qs = qs.filter(status__in=['pending', 'approved'])
         allowed_types = SCOPE_TO_TYPE.get(viewer_scope, [])
@@ -453,8 +455,18 @@ def time_off_list(request):
             qs = qs.filter(physician__physician_type__in=allowed_types)
         else:
             qs = qs.none()
+        if physician_id:
+            qs = qs.filter(physician_id=physician_id)
 
-    physicians = Physician.objects.filter(is_active=True, physician_type__in=['regular', 'psa'])
+    # Physician-filter dropdown, scoped to what this login is allowed to see:
+    # admins and nursing span both groups; NROC-scoped logins get NROC
+    # physicians only, PSA-scoped logins get PSA only.
+    if is_admin or is_nursing:
+        filter_types = ['regular', 'psa']
+    else:
+        filter_types = SCOPE_TO_TYPE.get(viewer_scope, [])
+    physicians = Physician.objects.filter(
+        is_active=True, physician_type__in=filter_types)
 
     # Resolve the logged-in user's physician record (used to mark their own requests)
     viewer_physician = profile.physician if profile else None
