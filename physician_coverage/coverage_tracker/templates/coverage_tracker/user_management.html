@@ -49,6 +49,10 @@
               <span class="badge" style="background:rgba(155,127,232,0.15);color:var(--purple);">
                 🛡 Physician Admin
               </span>
+            {% elif user.profile.is_nursing %}
+              <span class="badge" style="background:rgba(46,194,126,0.15);color:var(--green);">
+                🩺 Clinical
+              </span>
             {% else %}
               <span class="badge badge-regular">
                 👤 Physician
