@@ -17,7 +17,7 @@ from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
 
-#admin    user: superuser, pass:northside1  
+#admin    user: superuser, pass:radonc1  
 
 #physician   user: nroc_doc, pass: nroc_doctor1  
 
