@@ -25,6 +25,15 @@
     .nav-links a { color: var(--text-2); text-decoration: none; font-size: 13.5px; padding: 6px 12px; border-radius: 6px; transition: all 0.15s; }
     .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--card-hover); }
     .nav-spacer { flex: 1; }
+    .nav-dropdown { position: relative; }
+    .nav-dropdown-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: 13.5px; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.15s; user-select: none; }
+    .nav-dropdown-toggle:hover, .nav-dropdown:hover .nav-dropdown-toggle, .nav-dropdown:focus-within .nav-dropdown-toggle, .nav-dropdown-toggle.active { color: var(--text); background: var(--card-hover); }
+    .nav-dropdown-toggle .caret { width: 12px; height: 12px; transition: transform 0.15s; }
+    .nav-dropdown:hover .caret, .nav-dropdown:focus-within .caret { transform: rotate(180deg); }
+    .nav-dropdown-menu { position: absolute; top: 100%; left: 0; min-width: 175px; background: var(--navy-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 5px; display: none; flex-direction: column; gap: 2px; box-shadow: 0 10px 28px rgba(0,0,0,0.45); z-index: 200; }
+    .nav-dropdown:hover .nav-dropdown-menu, .nav-dropdown:focus-within .nav-dropdown-menu { display: flex; }
+    .nav-dropdown-menu a { display: block; padding: 7px 12px; border-radius: 6px; color: var(--text-2); text-decoration: none; font-size: 13.5px; transition: all 0.15s; white-space: nowrap; }
+    .nav-dropdown-menu a:hover, .nav-dropdown-menu a.active { color: var(--text); background: var(--card-hover); }
     main { max-width: 1280px; margin: 0 auto; padding: 2rem; }
     h1 { font-size: 22px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
     h2 { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
@@ -159,8 +168,17 @@
     <li><a href="/physicians/" {% if 'physician' in request.resolver_match.url_name %}class="active"{% endif %}>Physicians</a></li>
     <li><a href="/clinics/" ...>Clinics</a></li>
     
-    <li><a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a></li>
-    <li><a href="/locum-reports/" {% if request.resolver_match.url_name == 'locum_reports' %}class="active"{% endif %}>Locum Reports</a></li>
+    <li class="nav-dropdown">
+      <span class="nav-dropdown-toggle{% if request.resolver_match.url_name == 'locum_costs' or request.resolver_match.url_name == 'locum_reports' or request.resolver_match.url_name == 'locum_contacts' %} active{% endif %}" tabindex="0">
+        Locums
+        <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </span>
+      <div class="nav-dropdown-menu">
+        <a href="/locum-costs/" {% if request.resolver_match.url_name == 'locum_costs' %}class="active"{% endif %}>Locum Costs</a>
+        <a href="/locum-reports/" {% if request.resolver_match.url_name == 'locum_reports' %}class="active"{% endif %}>Locum Reports</a>
+        <a href="/locum-contacts/" {% if request.resolver_match.url_name == 'locum_contacts' %}class="active"{% endif %}>Locum Contacts</a>
+      </div>
+    </li>
     <li><a href="/users/" {% if 'user' in request.resolver_match.url_name %}class="active"{% endif %}>Users</a></li>
     {% endif %}
   </ul>

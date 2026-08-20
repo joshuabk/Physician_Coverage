@@ -46,6 +46,7 @@ urlpatterns = [
     path('coverage/<int:pk>/delete/', views.delete_coverage, name='delete_coverage'),
     path('locum-costs/', views.locum_costs, name='locum_costs'),
     path('locum-reports/', views.locum_reports, name='locum_reports'),
+    path('locum-contacts/', views.locum_contacts, name='locum_contacts'),
 
     # Availability
     path('availability/', views.availability_view, name='availability'),

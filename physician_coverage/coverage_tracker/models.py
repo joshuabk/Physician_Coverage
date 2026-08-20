@@ -101,6 +101,14 @@ class Physician(models.Model):
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
+    phone = models.CharField(
+        max_length=30, blank=True,
+        help_text="Contact phone number"
+    )
+    contact_notes = models.TextField(
+        blank=True,
+        help_text="Free-text contact notes (shown on the Locum Contacts page)"
+    )
     
     physician_type = models.CharField(max_length=10, choices=PHYSICIAN_TYPE_CHOICES, default='regular')
     total_vacation_days = models.PositiveIntegerField(

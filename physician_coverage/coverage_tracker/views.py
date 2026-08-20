@@ -1913,6 +1913,55 @@ def delete_coverage(request, pk):
 
 
 @admin_required
+def locum_contacts(request):
+    """Contact sheet for locum physicians: name, phone, email, and free-text
+    notes. Phone, email, and notes are editable inline (one save per locum).
+    """
+    locums = Physician.objects.filter(
+        is_active=True, physician_type='locum'
+    ).order_by('last_name', 'first_name')
+
+    if request.method == 'POST':
+        locum = get_object_or_404(
+            Physician, pk=request.POST.get('locum_pk'), physician_type='locum'
+        )
+        phone = request.POST.get('phone', '').strip()
+        email = request.POST.get('email', '').strip()
+        notes = request.POST.get('contact_notes', '').strip()
+
+        if not email:
+            messages.error(request, f'Email is required for {locum}.')
+            return redirect('locum_contacts')
+
+        # email is unique across physicians - guard against collisions
+        if Physician.objects.exclude(pk=locum.pk).filter(email__iexact=email).exists():
+            messages.error(
+                request,
+                f'Could not save {locum}: the email "{email}" is already used by another physician.'
+            )
+            return redirect('locum_contacts')
+
+        locum.phone = phone
+        locum.email = email
+        locum.contact_notes = notes
+        try:
+            locum.full_clean(exclude=None, validate_unique=False)
+        except ValidationError as e:
+            field_errors = '; '.join(
+                f"{field}: {', '.join(errs)}" for field, errs in e.message_dict.items()
+            )
+            messages.error(request, f'Could not save {locum}: {field_errors}')
+            return redirect('locum_contacts')
+        locum.save()
+        messages.success(request, f'Contact info updated for {locum}.')
+        return redirect('locum_contacts')
+
+    return render(request, 'coverage_tracker/locum_contacts.html', {
+        'locums': locums,
+    })
+
+
+@admin_required
 def locum_reports(request):
     """Monthly timesheet-style report for one locum: date, hours, facility,
     and supervising (covered) physician per shift, mirroring the Northside

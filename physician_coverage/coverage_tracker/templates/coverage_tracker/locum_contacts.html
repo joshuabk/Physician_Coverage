@@ -1,0 +1,98 @@
+{% extends "coverage_tracker/base.html" %}
+{% block title %}Locum Contacts{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Locum Contacts</h1>
+    <p class="text-muted text-sm mt-1">Contact information and notes for locum / covering physicians. Click Edit on a card to change the phone, email, or notes, then Save.</p>
+  </div>
+</div>
+
+{% if locums %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;align-items:start;">
+  {% for locum in locums %}
+  <form method="post" class="card locum-contact-card" style="display:flex;flex-direction:column;gap:0.9rem;">
+    {% csrf_token %}
+    <input type="hidden" name="locum_pk" value="{{ locum.pk }}">
+
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="avatar avatar-locum">{{ locum.first_name|first|upper }}{{ locum.last_name|first|upper }}</div>
+      <div>
+        <div style="font-size:15px;font-weight:600;color:var(--text);line-height:1.3;">
+          <a href="/physicians/{{ locum.pk }}/" style="color:var(--text);text-decoration:none;">{{ locum }}</a>
+        </div>
+        <div class="text-muted text-sm">{{ locum.agency|default:"No agency on file" }}</div>
+      </div>
+      <span class="badge badge-locum" style="margin-left:auto;">Locum</span>
+    </div>
+
+    <div class="form-group" style="margin-bottom:0;">
+      <label for="phone-{{ locum.pk }}">Phone</label>
+      <input type="tel" id="phone-{{ locum.pk }}" name="phone" class="form-control"
+             value="{{ locum.phone }}" placeholder="(555) 555-5555" autocomplete="off" disabled>
+    </div>
+
+    <div class="form-group" style="margin-bottom:0;">
+      <label for="email-{{ locum.pk }}">Email</label>
+      <input type="email" id="email-{{ locum.pk }}" name="email" class="form-control"
+             value="{{ locum.email }}" required autocomplete="off" disabled>
+    </div>
+
+    <div class="form-group" style="margin-bottom:0;">
+      <label for="notes-{{ locum.pk }}">Notes</label>
+      <textarea id="notes-{{ locum.pk }}" name="contact_notes" class="form-control"
+                placeholder="Preferred contact method, scheduling notes, etc." disabled>{{ locum.contact_notes }}</textarea>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button type="button" class="btn btn-ghost btn-sm edit-btn">Edit</button>
+      <button type="button" class="btn btn-ghost btn-sm cancel-btn" style="display:none;">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-sm save-btn" style="display:none;">Save</button>
+    </div>
+  </form>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <p class="empty-state">No active locum physicians in the system.</p>
+</div>
+{% endif %}
+
+<style>
+  .locum-contact-card .form-control:disabled {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text-2);
+    cursor: default;
+    opacity: 1;
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.locum-contact-card').forEach(function (card) {
+    var fields = card.querySelectorAll('.form-control');
+    var editBtn = card.querySelector('.edit-btn');
+    var cancelBtn = card.querySelector('.cancel-btn');
+    var saveBtn = card.querySelector('.save-btn');
+
+    function setEditing(on) {
+      fields.forEach(function (f) { f.disabled = !on; });
+      editBtn.style.display = on ? 'none' : '';
+      cancelBtn.style.display = on ? '' : 'none';
+      saveBtn.style.display = on ? '' : 'none';
+    }
+
+    editBtn.addEventListener('click', function () {
+      // Remember current values so Cancel can restore them.
+      fields.forEach(function (f) { f.dataset.original = f.value; });
+      setEditing(true);
+      fields[0].focus();
+    });
+
+    cancelBtn.addEventListener('click', function () {
+      fields.forEach(function (f) { f.value = f.dataset.original; });
+      setEditing(false);
+    });
+  });
+</script>
+{% endblock %}
