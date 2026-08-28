@@ -45,7 +45,7 @@ from .forms import (
     WeeklyScheduleForm,
 )
 
-from .decorators import login_required_custom, admin_required, can_approve_required, clinic_access_required
+from .decorators import login_required_custom, admin_required, can_approve_required, clinic_access_required, locum_contacts_access_required
 
 
 # Maps a UserProfile.scope value to the Physician.physician_type values it covers.
@@ -1912,16 +1912,22 @@ def delete_coverage(request, pk):
     return redirect(f'/clinics/?date={date_str}')
 
 
-@admin_required
+@locum_contacts_access_required
 def locum_contacts(request):
     """Contact sheet for locum physicians: name, phone, email, and free-text
     notes. Phone, email, and notes are editable inline (one save per locum).
+
+    Admins can edit; PSA physician administrators get a read-only view.
     """
     locums = Physician.objects.filter(
         is_active=True, physician_type='locum'
     ).order_by('last_name', 'first_name')
+    can_edit = request.user.profile.is_admin
 
     if request.method == 'POST':
+        if not can_edit:
+            messages.error(request, 'Only administrators can edit locum contact information.')
+            return redirect('locum_contacts')
         locum = get_object_or_404(
             Physician, pk=request.POST.get('locum_pk'), physician_type='locum'
         )
@@ -1958,6 +1964,7 @@ def locum_contacts(request):
 
     return render(request, 'coverage_tracker/locum_contacts.html', {
         'locums': locums,
+        'can_edit': can_edit,
     })
 
 

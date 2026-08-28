@@ -104,3 +104,24 @@ def can_approve_required(view_func):
             return redirect('dashboard')
         return view_func(request, *args, **kwargs)
     return wrapper
+
+
+def locum_contacts_access_required(view_func):
+    """Allow admins, plus PSA physician administrators (scope 'psa' or 'all').
+
+    The Locum Contacts page is read-only for physician administrators; only
+    admins may edit (enforced in the view).
+    """
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect(f'/login/?next={request.path}')
+        profile = _ensure_profile(request)
+        allowed = profile.is_admin or (
+            profile.is_physician_admin and profile.scope in ('psa', 'all')
+        )
+        if not allowed:
+            messages.error(request, 'You do not have permission to access that page.')
+            return redirect('time_off_list')
+        return view_func(request, *args, **kwargs)
+    return wrapper
