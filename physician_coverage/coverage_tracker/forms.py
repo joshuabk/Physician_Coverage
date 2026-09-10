@@ -1,5 +1,6 @@
 from django import forms
 from decimal import Decimal
+import datetime
 from .models import Physician, Clinic, TimeOffRequest, CoverageAssignment, PhysicianAvailability, OnCallSchedule, ClinicSchedule
 
 
@@ -143,6 +144,36 @@ class CoverageAssignmentForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
         }
 
+    # ── Optional weekly repeat ─────────────────────────────────────────────
+    # For a locum who routinely works a clinic a couple of days a week (not
+    # standing in for anyone), tick the weekdays (and optionally an end date): one
+    # CoverageAssignment row is created per matching workday, so the days
+    # show on the clinics page/calendar and count toward Locum Costs.
+    REPEAT_DAY_CHOICES = [
+        (0, 'Mon'), (1, 'Tue'), (2, 'Wed'), (3, 'Thu'), (4, 'Fri'),
+    ]
+    # A repeat with no end date is treated as open-ended: rows are generated
+    # this far ahead of the start date. Submit again later (from any date) to
+    # extend — days already assigned are skipped, so nothing is duplicated.
+    OPEN_ENDED_YEARS = 2
+
+    repeat_days = forms.TypedMultipleChoiceField(
+        choices=REPEAT_DAY_CHOICES, coerce=int, required=False,
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'repeat-days'}),
+        label='Repeat weekly on',
+        help_text=('Optional. Tick the weekdays this locum routinely works this '
+                   'clinic; one assignment is created for every matching workday '
+                   'from the date above onward (holidays and days already assigned '
+                   'are skipped). Leave unticked for a single day.'),
+    )
+    repeat_until = forms.DateField(
+        required=False, label='Repeat until',
+        widget=forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+        help_text=('Optional last date of the repeat (inclusive). Leave blank for an '
+                   'open-ended repeat — days are scheduled two years ahead, and you '
+                   'can end it any time with "End routine" on the Clinics page.'),
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['covering_physician'].queryset = Physician.objects.filter(
@@ -152,6 +183,9 @@ class CoverageAssignmentForm(forms.ModelForm):
             is_active=True, physician_type='regular'
         )
         self.fields['covered_physician'].required = False
+        self.fields['covered_physician'].help_text = (
+            'Leave blank when the locum is routinely covering the clinic rather '
+            'than standing in for a specific physician.')
         self.fields['hours'].initial = Decimal('8.00')
 
     def clean_hours(self):
@@ -160,6 +194,68 @@ class CoverageAssignmentForm(forms.ModelForm):
         if hours is None or hours < 0:
             return Decimal('8.00')
         return hours
+
+    def clean(self):
+        cleaned = super().clean()
+        days = cleaned.get('repeat_days') or []
+        until = cleaned.get('repeat_until')
+        start = cleaned.get('date')
+        if until and not days:
+            self.add_error('repeat_days', 'Tick at least one weekday to repeat, or clear the end date.')
+        if days and until and start and until < start:
+            self.add_error('repeat_until', 'End date must be on or after the start date.')
+        return cleaned
+
+    def _get_validation_exclusions(self):
+        # In repeat mode the view skips dates already assigned, so an existing
+        # row on the start date is not an error the way it is for a single
+        # day. Excluding `date` from model validation makes Django skip the
+        # (clinic, covering_physician, date) unique constraint; the form's own
+        # DateField has already validated the value.
+        exclude = super()._get_validation_exclusions()
+        if self.is_repeat:
+            exclude.add('date')
+        return exclude
+
+    @property
+    def is_repeat(self):
+        return bool(self.cleaned_data.get('repeat_days'))
+
+    @property
+    def is_open_ended(self):
+        return self.is_repeat and not self.cleaned_data.get('repeat_until')
+
+    def repeat_end(self):
+        """The last date rows are generated for: the given end date, or
+        OPEN_ENDED_YEARS after the start when none was given."""
+        until = self.cleaned_data.get('repeat_until')
+        if until:
+            return until
+        start = self.cleaned_data['date']
+        try:
+            return start.replace(year=start.year + self.OPEN_ENDED_YEARS)
+        except ValueError:            # Feb 29 -> Feb 28
+            return start.replace(year=start.year + self.OPEN_ENDED_YEARS, day=28)
+
+    def repeat_dates(self):
+        """Every workday from `date` through `repeat_end()` on a ticked weekday
+        (holidays excluded), oldest first. Empty when not repeating."""
+        from .models import get_holidays, get_extra_workdays, is_workday
+        if not self.is_repeat:
+            return []
+        start = self.cleaned_data['date']
+        until = self.repeat_end()
+        weekdays = set(self.cleaned_data['repeat_days'])
+        holidays, extra = set(), set()
+        for y in range(start.year, until.year + 1):
+            holidays |= set(get_holidays(y))
+            extra |= get_extra_workdays(y)
+        out, d = [], start
+        while d <= until:
+            if d.weekday() in weekdays and is_workday(d, holidays, extra):
+                out.append(d)
+            d += datetime.timedelta(days=1)
+        return out
 
 
 class PhysicianAvailabilityForm(forms.ModelForm):
@@ -290,4 +386,4 @@ class OnCallScheduleForm(forms.ModelForm):
                     [m for m in non_field if not str(m).startswith(generic_msg_prefix)]
                 )
                 if not self._errors['__all__']:
-                    del self._errors['__all__']
+                    del self._errors['__all__']

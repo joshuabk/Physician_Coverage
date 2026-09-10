@@ -35,7 +35,7 @@ MON, TUE, WED = date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)
 
 EMAIL_SETTINGS = dict(
     EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
-    SEND_NOTIFICATION_EMAILS=True,
+    SEND_NOTIFICATION_EMAILS=False,
     EMAIL_HOST_USER='scheduler@test.org',
     TIME_OFF_NOTIFICATION_RECIPIENTS=['office@test.org', 'manager@test.org'],
 )

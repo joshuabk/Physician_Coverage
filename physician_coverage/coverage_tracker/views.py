@@ -1885,10 +1885,54 @@ def add_coverage(request):
     if request.method == 'POST':
         form = CoverageAssignmentForm(request.POST)
         if form.is_valid():
+            assigned_by = request.user.get_full_name() or request.user.username
+            if form.is_repeat:
+                # Routine weekly coverage (e.g. a locum working this clinic
+                # every Mon/Wed): one row per matching workday. Days that
+                # already have this locum at this clinic are left alone.
+                template = form.save(commit=False)
+                dates = form.repeat_dates()
+                existing = set(CoverageAssignment.objects.filter(
+                    clinic=template.clinic,
+                    covering_physician=template.covering_physician,
+                    date__in=dates,
+                ).values_list('date', flat=True))
+                created = []
+                with transaction.atomic():
+                    for d in dates:
+                        if d in existing:
+                            continue
+                        created.append(CoverageAssignment.objects.create(
+                            clinic=template.clinic,
+                            covering_physician=template.covering_physician,
+                            covered_physician=template.covered_physician,
+                            date=d,
+                            hours=template.hours,
+                            hourly_rate_override=template.hourly_rate_override,
+                            notes=template.notes,
+                        ))
+                if created:
+                    _notify_locum_assigned(created, assigned_by=assigned_by,
+                                           covered_physician=template.covered_physician)
+                    msg = (f'{len(created)} coverage day(s) added for '
+                           f'{template.covering_physician} at {template.clinic.name} '
+                           f'({created[0].date:%b %d} – {created[-1].date:%b %d, %Y}).')
+                    if form.is_open_ended:
+                        msg += (' Open-ended: days are scheduled two years ahead — submit '
+                                'again later to extend, or use "End routine" on the '
+                                'Clinics page to stop.')
+                    if existing:
+                        msg += f' {len(existing)} day(s) already assigned were skipped.'
+                    messages.success(request, msg)
+                    return redirect(f'/clinics/?date={created[0].date}')
+                messages.info(request, 'No new coverage days: every matching day was '
+                                       'already assigned or fell on a holiday.')
+                return redirect('clinic_list')
+
             assignment = form.save()
             _notify_locum_assigned(
                 [assignment],
-                assigned_by=request.user.get_full_name() or request.user.username,
+                assigned_by=assigned_by,
                 covered_physician=assignment.covered_physician,
             )
             messages.success(request, 'Coverage assignment added.')
@@ -1910,6 +1954,49 @@ def delete_coverage(request, pk):
     assignment.delete()
     messages.success(request, 'Coverage assignment removed.')
     return redirect(f'/clinics/?date={date_str}')
+
+
+@admin_required
+def end_routine_coverage(request):
+    """End a locum's recurring (routine) coverage at a clinic.
+
+    Removes every coverage row for this locum at this clinic on or after the
+    given date that is NOT tied to a specific covered physician — i.e. the
+    rows created by the weekly-repeat option on Assign Locum Coverage.
+    Earlier days are kept for cost history; days where the locum covers a
+    named physician's time off are left alone.
+    """
+    if request.method != 'POST':
+        return redirect('clinic_list')
+    date_str = request.POST.get('date', '')
+    try:
+        from_date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        messages.error(request, 'Invalid date.')
+        return redirect('clinic_list')
+    back = f'/clinics/?date={from_date}'
+    try:
+        locum = Physician.objects.get(pk=request.POST.get('locum'), physician_type='locum')
+        clinic = Clinic.objects.get(pk=request.POST.get('clinic'))
+    except (Physician.DoesNotExist, Clinic.DoesNotExist, ValueError, TypeError):
+        messages.error(request, 'Invalid locum or clinic.')
+        return redirect(back)
+
+    qs = CoverageAssignment.objects.filter(
+        clinic=clinic, covering_physician=locum, date__gte=from_date,
+        covered_physician__isnull=True, no_coverage_needed=False,
+    )
+    last = qs.order_by('-date').values_list('date', flat=True).first()
+    n, _ = qs.delete()
+    if n:
+        messages.success(
+            request,
+            f'Ended routine coverage: removed {n} day(s) for {locum} at {clinic.name} '
+            f'from {from_date:%b %d} through {last:%b %d, %Y}.')
+    else:
+        messages.info(request, f'No routine coverage days for {locum} at {clinic.name} '
+                               f'on or after {from_date:%b %d, %Y}.')
+    return redirect(back)
 
 
 @locum_contacts_access_required
@@ -3091,4 +3178,4 @@ def delete_on_call(request, pk):
         return redirect('on_call_schedule')
     return render(request, 'coverage_tracker/on_call_confirm_delete.html', {
         'entry': entry,
-    })
+    })

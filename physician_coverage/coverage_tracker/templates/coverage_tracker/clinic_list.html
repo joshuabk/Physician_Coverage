@@ -69,11 +69,23 @@
               <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);">
                 <div>
                   <div class="locum-tag">{{ a.covering_physician }}</div>
-                  {% if a.covered_physician %}<div class="text-muted text-sm" style="margin-top:2px;">covering {{ a.covered_physician }}</div>{% endif %}
-                  
+                  {% if a.covered_physician %}<div class="text-muted text-sm" style="margin-top:2px;">covering {{ a.covered_physician }}</div>{% else %}<div class="text-muted text-sm" style="margin-top:2px;">routine clinic day</div>{% endif %}
+
                 </div>
                 {% if request.user.profile.is_admin %}
-                <form method="post" action="/coverage/{{ a.pk }}/delete/" style="display:inline;" onsubmit="return confirm('Remove this assignment?')">{% csrf_token %}<button type="submit" class="btn btn-danger btn-sm">✕</button></form>
+                <div class="flex gap-2">
+                  {% if not a.covered_physician %}
+                  <form method="post" action="/coverage/end-routine/" style="display:inline;"
+                        onsubmit="return confirm('End {{ a.covering_physician }}\'s routine coverage at {{ item.clinic.name }}?\n\nThis removes {{ view_date|date:'M j' }} and every later routine day (past days and time-off coverage are kept).')">
+                    {% csrf_token %}
+                    <input type="hidden" name="clinic" value="{{ item.clinic.pk }}">
+                    <input type="hidden" name="locum" value="{{ a.covering_physician.pk }}">
+                    <input type="hidden" name="date" value="{{ view_date|date:'Y-m-d' }}">
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Remove this and all later routine days">End routine</button>
+                  </form>
+                  {% endif %}
+                  <form method="post" action="/coverage/{{ a.pk }}/delete/" style="display:inline;" onsubmit="return confirm('Remove this assignment?')">{% csrf_token %}<button type="submit" class="btn btn-danger btn-sm" title="Remove this day only">✕</button></form>
+                </div>
                 {% endif %}
               </div>
               {% endfor %}
@@ -115,9 +127,24 @@
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-3);margin-bottom:5px;">Additional Coverage</div>
             {% for a in item.assignments %}
             <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;">
-              <div class="locum-tag">{{ a.covering_physician }}</div>
+              <div>
+                <div class="locum-tag">{{ a.covering_physician }}</div>
+                {% if a.covered_physician %}<div class="text-muted text-sm" style="margin-top:2px;">covering {{ a.covered_physician }}</div>{% else %}<div class="text-muted text-sm" style="margin-top:2px;">routine clinic day{% if a.hours %} · {{ a.hours|floatformat:"-2" }} hrs{% endif %}</div>{% endif %}
+              </div>
               {% if request.user.profile.is_admin %}
-              <form method="post" action="/coverage/{{ a.pk }}/delete/" style="display:inline;" onsubmit="return confirm('Remove?')">{% csrf_token %}<button type="submit" class="btn btn-danger btn-sm">✕</button></form>
+              <div class="flex gap-2">
+                {% if not a.covered_physician %}
+                <form method="post" action="/coverage/end-routine/" style="display:inline;"
+                      onsubmit="return confirm('End {{ a.covering_physician }}\'s routine coverage at {{ item.clinic.name }}?\n\nThis removes {{ view_date|date:'M j' }} and every later routine day (past days and time-off coverage are kept).')">
+                  {% csrf_token %}
+                  <input type="hidden" name="clinic" value="{{ item.clinic.pk }}">
+                  <input type="hidden" name="locum" value="{{ a.covering_physician.pk }}">
+                  <input type="hidden" name="date" value="{{ view_date|date:'Y-m-d' }}">
+                  <button type="submit" class="btn btn-ghost btn-sm" title="Remove this and all later routine days">End routine</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/coverage/{{ a.pk }}/delete/" style="display:inline;" onsubmit="return confirm('Remove this day only?')">{% csrf_token %}<button type="submit" class="btn btn-danger btn-sm" title="Remove this day only">✕</button></form>
+              </div>
               {% endif %}
             </div>
             {% endfor %}

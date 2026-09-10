@@ -44,6 +44,7 @@ urlpatterns = [
     path('clinics/<int:pk>/edit/', views.edit_clinic, name='edit_clinic'),
     path('coverage/add/', views.add_coverage, name='add_coverage'),
     path('coverage/<int:pk>/delete/', views.delete_coverage, name='delete_coverage'),
+    path('coverage/end-routine/', views.end_routine_coverage, name='end_routine_coverage'),
     path('locum-costs/', views.locum_costs, name='locum_costs'),
     path('locum-reports/', views.locum_reports, name='locum_reports'),
     path('locum-contacts/', views.locum_contacts, name='locum_contacts'),

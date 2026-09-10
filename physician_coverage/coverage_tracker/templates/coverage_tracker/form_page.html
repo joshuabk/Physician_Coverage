@@ -91,6 +91,31 @@
 
 
 (function () {
+  // Assign Locum Coverage form: lay the "Repeat weekly on" weekday boxes out
+  // in a row and only show "Repeat until" once a weekday is ticked. No-ops
+  // on every other form.
+  var first = document.getElementById('id_repeat_days_0');
+  var until = document.getElementById('id_repeat_until');
+  if (!first || !until) return;
+  var list = first.closest('div').parentElement;   // the <div> wrapping all the <div><label> rows
+  list.style.display = 'flex';
+  list.style.flexWrap = 'wrap';
+  list.style.gap = '4px 14px';
+  var boxes = list.querySelectorAll('input[type=checkbox]');
+  var untilGroup = until.closest('.form-group') || until.parentElement;
+
+  function apply() {
+    var any = false;
+    boxes.forEach(function (b) { if (b.checked) any = true; });
+    untilGroup.style.display = any ? '' : 'none';
+    if (!any) until.value = '';
+  }
+  boxes.forEach(function (b) { b.addEventListener('change', apply); });
+  // Keep the field visible if the server re-rendered with an error on it.
+  if (!untilGroup.querySelector('[style*="var(--red)"]')) apply();
+})();
+
+(function () {
   // On the time-off form, make the end-date picker open at the selected
   // start date instead of today. The guard means this no-ops on other
   // forms (physician, clinic, ...) that don't have both date fields.

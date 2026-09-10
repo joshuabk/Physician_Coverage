@@ -322,13 +322,21 @@ class AuthAndPermissionTests(TestCase):
             r = self.c.get(url)
             self.assertEqual(r.status_code, 200, url)
 
-    def test_nursing_locked_to_clinics(self):
+    def test_nursing_locked_to_allowed_pages(self):
+        """Nursing (clinical) logins may view Clinics, Calendar, On-Call and
+        Time Off; every other page redirects them away (to the clinics page via
+        the nursing gate, or to the time-off page via the admin-only gate)."""
         self.c.force_login(self.nurse)
-        r = self.c.get('/clinics/')
-        self.assertEqual(r.status_code, 200)
-        for url in ['/', '/time-off/', '/physicians/']:
+        for url in ['/clinics/', '/calendar/', '/on-call/', '/time-off/']:
+            r = self.c.get(url)
+            self.assertEqual(r.status_code, 200, url)
+        for url in ['/', '/physicians/', '/availability/', '/locum-costs/',
+                    '/users/', '/time-off/add/', '/time-off/approved-coverage/']:
             r = self.c.get(url, follow=True)
-            self.assertEqual(r.request['PATH_INFO'], '/clinics/', url)
+            landed = r.request['PATH_INFO']
+            self.assertNotEqual(landed, url, f'{url} should redirect a nursing login away')
+            self.assertIn(landed, ('/clinics/', '/time-off/'), url)
+            self.assertEqual(r.status_code, 200, url)
 
     def test_logout(self):
         self.c.force_login(self.admin)
