@@ -284,7 +284,12 @@ def physician_detail(request, pk):
     else:
         # Locum cost totals run on the locum fiscal year (Oct 1 - Sep 30)
         year = _int_param(request, 'year', current_locum_fiscal_year())
-    time_off_requests = TimeOffRequest.objects.filter(physician=physician).order_by('-start_date')
+    # Cancelled requests are hidden from the physician's Time Off History
+    time_off_requests = (
+        TimeOffRequest.objects.filter(physician=physician)
+        .exclude(status='cancelled')
+        .order_by('-start_date')
+    )
     coverage = CoverageAssignment.objects.filter(
         covering_physician=physician
     ).order_by('-date').select_related('clinic', 'covered_physician')
@@ -298,8 +303,17 @@ def physician_detail(request, pk):
     coverage_this_year = CoverageAssignment.objects.filter(
         covering_physician=physician,
         date__gte=locum_fy_start, date__lte=locum_fy_end,
-    ).select_related('clinic')
-    
+    ).select_related('clinic', 'covered_physician').order_by('date')
+    # Locum detail also lists next year's assignments so upcoming bookings
+    # (e.g. January dates entered in December) are visible alongside the
+    # current year's.
+    next_year = year + 1
+    next_fy_start, next_fy_end = locum_fiscal_year_range(next_year)
+    coverage_next_year = CoverageAssignment.objects.filter(
+        covering_physician=physician,
+        date__gte=next_fy_start, date__lte=next_fy_end,
+    ).select_related('clinic', 'covered_physician').order_by('date')
+
     is_regular_like = physician.is_regular or physician.is_psa
 
     context = {
@@ -319,6 +333,8 @@ def physician_detail(request, pk):
         'time_off_requests': time_off_requests,
         'coverage': coverage[:20],
         'coverage_this_year': coverage_this_year,
+        'next_year': next_year,
+        'coverage_next_year': coverage_next_year,
         'availability': availability,
     }
     return render(request, 'coverage_tracker/physician_detail.html', context)

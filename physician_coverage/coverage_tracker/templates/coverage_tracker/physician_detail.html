@@ -127,13 +127,14 @@
   </div>
 
   {% else %}
-  <!-- Coverage assignments this year -->
+  <!-- Coverage assignments: current year and next year -->
   <div class="card">
-    <div class="card-title">Coverage Assignments — {{ year }}</div>
+    <div class="card-title">Coverage Assignments — {{ year }} &amp; {{ next_year }}</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Clinic</th><th>Covering</th><th>Hours</th><th>Rate</th></tr></thead>
+        <thead><tr><th>Date</th><th>Clinic</th><th>Covering</th><th>Hours</th><th>Rate</th><th>Daily</th></tr></thead>
         <tbody>
+          <tr><th colspan="6" style="text-align:left;background:var(--bg-2, transparent);">{{ year }}</th></tr>
           {% for a in coverage_this_year %}
           <tr>
             <td><strong>{{ a.date|date:"M j, Y" }}</strong></td>
@@ -144,7 +145,20 @@
             <td class="money" style="color:var(--amber); font-weight:500;">${{ a.effective_daily_rate|floatformat:2 }}</td>
           </tr>
           {% empty %}
-          <tr><td colspan="4" class="empty-state">No assignments this year.</td></tr>
+          <tr><td colspan="6" class="empty-state">No assignments in {{ year }}.</td></tr>
+          {% endfor %}
+          <tr><th colspan="6" style="text-align:left;background:var(--bg-2, transparent);">{{ next_year }}</th></tr>
+          {% for a in coverage_next_year %}
+          <tr>
+            <td><strong>{{ a.date|date:"M j, Y" }}</strong></td>
+            <td>{{ a.clinic }}</td>
+            <td class="text-muted">{% if a.covered_physician %}{{ a.covered_physician }}{% else %}—{% endif %}</td>
+            <td style="font-family:'DM Mono',monospace;">{{ a.hours|floatformat:0 }}</td>
+            <td class="money">${{ a.effective_hourly_rate|floatformat:2 }}</td>
+            <td class="money" style="color:var(--amber); font-weight:500;">${{ a.effective_daily_rate|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="empty-state">No assignments in {{ next_year }}.</td></tr>
           {% endfor %}
         </tbody>
       </table>
